@@ -1,0 +1,27 @@
+# 바이너리
+/ddokdak
+*.exe
+
+# 환경변수
+.env
+
+# 로그
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# 기타
+.codegraph
+.omo/
