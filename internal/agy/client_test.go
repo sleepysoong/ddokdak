@@ -7,10 +7,7 @@ import (
 )
 
 func TestNewClient(t *testing.T) {
-	c := NewClient("gemini-2.5-pro", "120", "/tmp/logs")
-	if c.model != "gemini-2.5-pro" {
-		t.Errorf("expected model 'gemini-2.5-pro', got %q", c.model)
-	}
+	c := NewClient("120", "/tmp/logs")
 	if c.timeout != "120" {
 		t.Errorf("expected timeout '120', got %q", c.timeout)
 	}
@@ -20,10 +17,10 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestBuildCommand_NewConversation(t *testing.T) {
-	c := NewClient("gemini-2.5-pro", "120", "/var/log/ddokdak")
+	c := NewClient("120", "/var/log/ddokdak")
 	ctx := context.Background()
 
-	cmd := c.buildCommand(ctx, "Hello, world!", "thread-abc-123", "")
+	cmd := c.buildCommand(ctx, "Hello, world!", "gemini-2.5-pro", "thread-abc-123", "")
 
 	args := cmd.Args
 	// args[0] is the binary path; the rest are CLI flags.
@@ -51,10 +48,10 @@ func TestBuildCommand_NewConversation(t *testing.T) {
 }
 
 func TestBuildCommand_WithConversation(t *testing.T) {
-	c := NewClient("gemini-2.5-flash", "60", "/logs")
+	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	cmd := c.buildCommand(ctx, "Follow-up question", "thread-xyz", "conv-id-999")
+	cmd := c.buildCommand(ctx, "Follow-up question", "gemini-2.5-flash", "thread-xyz", "conv-id-999")
 
 	args := cmd.Args
 
@@ -96,10 +93,10 @@ func TestBuildCommand_WithConversation(t *testing.T) {
 }
 
 func TestBuildCommand_LogFilePath(t *testing.T) {
-	c := NewClient("model-x", "30", "/data/agy-logs")
+	c := NewClient("30", "/data/agy-logs")
 	ctx := context.Background()
 
-	cmd := c.buildCommand(ctx, "test prompt", "my-thread-id", "")
+	cmd := c.buildCommand(ctx, "test prompt", "model-x", "my-thread-id", "")
 
 	args := cmd.Args
 	foundLogFile := false
@@ -165,10 +162,10 @@ func TestParseResponse(t *testing.T) {
 }
 
 func TestExecute_EmptyPrompt(t *testing.T) {
-	c := NewClient("model", "60", "/logs")
+	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.Execute(ctx, "", "", "thread-1")
+	_, _, err := c.Execute(ctx, "", "model", "", "thread-1")
 	if err == nil {
 		t.Error("expected error for empty prompt, got nil")
 	}
@@ -178,10 +175,10 @@ func TestExecute_EmptyPrompt(t *testing.T) {
 }
 
 func TestExecute_EmptyThreadID(t *testing.T) {
-	c := NewClient("model", "60", "/logs")
+	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.Execute(ctx, "hello", "", "")
+	_, _, err := c.Execute(ctx, "hello", "model", "", "")
 	if err == nil {
 		t.Error("expected error for empty threadID, got nil")
 	}
@@ -191,10 +188,10 @@ func TestExecute_EmptyThreadID(t *testing.T) {
 }
 
 func TestExecuteWithContinuation_EmptyConversationID(t *testing.T) {
-	c := NewClient("model", "60", "/logs")
+	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.ExecuteWithContinuation(ctx, "hello", "", "thread-1")
+	_, _, err := c.ExecuteWithContinuation(ctx, "hello", "model", "", "thread-1")
 	if err == nil {
 		t.Error("expected error for empty conversationID, got nil")
 	}
@@ -204,10 +201,10 @@ func TestExecuteWithContinuation_EmptyConversationID(t *testing.T) {
 }
 
 func TestBuildCommand_BinaryName(t *testing.T) {
-	c := NewClient("model", "60", "/logs")
+	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	cmd := c.buildCommand(ctx, "test", "thread-1", "")
+	cmd := c.buildCommand(ctx, "test", "model", "thread-1", "")
 
 	// The binary should be "agy".
 	if cmd.Path == "" {
@@ -219,10 +216,10 @@ func TestBuildCommand_BinaryName(t *testing.T) {
 }
 
 func TestBuildCommand_FlagOrder(t *testing.T) {
-	c := NewClient("test-model", "90", "/var/logs")
+	c := NewClient("90", "/var/logs")
 	ctx := context.Background()
 
-	cmd := c.buildCommand(ctx, "my prompt", "tid", "cid")
+	cmd := c.buildCommand(ctx, "my prompt", "test-model", "tid", "cid")
 	args := cmd.Args[1:] // skip binary
 
 	// --model should come before -p

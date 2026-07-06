@@ -17,6 +17,11 @@ type Session struct {
 	// ConversationID is the Antigravity CLI conversation ID.
 	// It starts as an empty string and is set later.
 	ConversationID string
+	// Model is the specific model to use for this session.
+	// If empty, the global model will be used.
+	Model string
+	// MsgChan is used to queue messages for debouncing.
+	MsgChan chan string
 	// CreatedAt is the time the session was created.
 	CreatedAt time.Time
 	// LastActiveAt is the time the session was last active.
@@ -32,6 +37,8 @@ func NewSession(threadID string) *Session {
 		ID:             generateUUID(),
 		ThreadID:       threadID,
 		ConversationID: "",
+		Model:          "",
+		MsgChan:        make(chan string, 100),
 		CreatedAt:      now,
 		LastActiveAt:   now,
 	}
@@ -56,6 +63,20 @@ func (s *Session) GetConversationID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ConversationID
+}
+
+// SetModel sets the AI model for this session.
+func (s *Session) SetModel(model string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Model = model
+}
+
+// GetModel returns the AI model for this session.
+func (s *Session) GetModel() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Model
 }
 
 // generateUUID generates a UUID v4 string using crypto/rand.

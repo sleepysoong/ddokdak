@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -41,6 +42,22 @@ type Config struct {
 
 	// LogLevel은 로깅 수준을 나타냅니다. (debug, info, warn, error)
 	LogLevel string
+
+	mu sync.RWMutex
+}
+
+// SetGlobalModel은 글로벌 AI 모델을 변경합니다.
+func (c *Config) SetGlobalModel(model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AgyModel = model
+}
+
+// GetGlobalModel은 현재 설정된 글로벌 AI 모델을 반환합니다.
+func (c *Config) GetGlobalModel() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.AgyModel
 }
 
 // LoadConfig는 환경변수에서 설정값을 읽어 Config 구조체를 반환합니다.

@@ -3,12 +3,16 @@ package command
 import (
 	"testing"
 
+	"github.com/sleepysoong/ddokdak/internal/config"
+	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
 )
 
 func TestNewHandler(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
-	handler := NewHandler(channelStore)
+	cfg := &config.Config{}
+	sm := session.NewSessionManager()
+	handler := NewHandler(channelStore, cfg, sm)
 
 	if handler == nil {
 		t.Fatal("NewHandler()가 nil을 반환했습니다")
@@ -21,7 +25,9 @@ func TestNewHandler(t *testing.T) {
 
 func TestHandlerHasChannelStore(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
-	handler := NewHandler(channelStore)
+	cfg := &config.Config{}
+	sm := session.NewSessionManager()
+	handler := NewHandler(channelStore, cfg, sm)
 
 	// channelStore가 올바르게 설정되었는지 확인
 	if handler.channelStore != channelStore {

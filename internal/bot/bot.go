@@ -13,6 +13,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/agy"
 	"github.com/sleepysoong/ddokdak/internal/command"
 	"github.com/sleepysoong/ddokdak/internal/config"
+	"github.com/sleepysoong/ddokdak/internal/downloader"
 	"github.com/sleepysoong/ddokdak/internal/handler"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
@@ -53,13 +54,18 @@ func New(cfg *config.Config) (*Bot, error) {
 	channelStore := store.NewInMemoryChannelStore()
 	sessionManager := session.NewSessionManager()
 	agyClient := agy.NewClient(
-		cfg.AgyModel,
 		fmt.Sprintf("%s", cfg.AgyTimeout),
 		logDir,
 	)
 
-	commandHandler := command.NewHandler(channelStore)
-	messageHandler := handler.NewMessageHandler(channelStore, sessionManager, agyClient)
+	dlDir := filepath.Join(".", "downloads")
+	dl, err := downloader.New(dlDir)
+	if err != nil {
+		return nil, fmt.Errorf("다운로더 초기화 실패: %w", err)
+	}
+
+	commandHandler := command.NewHandler(channelStore, cfg, sessionManager)
+	messageHandler := handler.NewMessageHandler(channelStore, sessionManager, agyClient, cfg, dl)
 
 	return &Bot{
 		session:        dg,

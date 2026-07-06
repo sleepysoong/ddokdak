@@ -11,6 +11,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sleepysoong/ddokdak/internal/agy"
+	"github.com/sleepysoong/ddokdak/internal/config"
+	"github.com/sleepysoong/ddokdak/internal/downloader"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
 )
@@ -22,6 +24,9 @@ const (
 	// typingInterval은 타이핑 인디케이터 갱신 간격입니다.
 	typingInterval = 5 * time.Second
 
+	// debounceInterval은 여러 메시지를 하나로 묶어 처리하기 위한 대기 시간입니다.
+	debounceInterval = 2 * time.Second
+
 	// maxMessageLength는 디스코드 메시지 최대 길이입니다.
 	maxMessageLength = 2000
 )
@@ -31,6 +36,8 @@ type MessageHandler struct {
 	channelStore   store.ChannelStore
 	sessionManager *session.SessionManager
 	agyClient      *agy.Client
+	config         *config.Config
+	downloader     *downloader.Downloader
 }
 
 // NewMessageHandler는 새로운 메시지 핸들러를 생성합니다.
@@ -38,11 +45,15 @@ func NewMessageHandler(
 	channelStore store.ChannelStore,
 	sessionManager *session.SessionManager,
 	agyClient *agy.Client,
+	cfg *config.Config,
+	dl *downloader.Downloader,
 ) *MessageHandler {
 	return &MessageHandler{
 		channelStore:   channelStore,
 		sessionManager: sessionManager,
 		agyClient:      agyClient,
+		config:         cfg,
+		downloader:     dl,
 	}
 }
 
@@ -96,8 +107,11 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 	sess := h.sessionManager.CreateSession(thread.ID)
 	log.Printf("새 세션 생성: ThreadID=%s, SessionID=%s", thread.ID, sess.ID)
 
-	// AI 응답 처리 (비동기)
-	go h.processAIResponse(s, thread.ID, m.Content, sess)
+	// 세션 프로세서 시작
+	h.startSessionProcessor(s, sess)
+
+	// 메시지 큐에 추가
+	h.enqueueMessage(s, m, sess)
 }
 
 // handleThreadMessage는 쓰레드 내 메시지를 처리합니다.
@@ -107,15 +121,60 @@ func (h *MessageHandler) handleThreadMessage(s *discordgo.Session, m *discordgo.
 	// 세션 확인
 	sess, exists := h.sessionManager.GetSession(threadID)
 	if !exists {
-		// 세션이 없는 쓰레드는 무시
-		return
+		// 봇 재시작 등으로 세션이 메모리에 없다면 새로 생성하여 처리 이어나감
+		sess = h.sessionManager.CreateSession(threadID)
+		h.startSessionProcessor(s, sess)
 	}
 
 	// 마지막 활동 시간 갱신
 	sess.UpdateLastActive()
 
-	// AI 응답 처리 (비동기)
-	go h.processAIResponse(s, threadID, m.Content, sess)
+	// 메시지 큐에 추가
+	h.enqueueMessage(s, m, sess)
+}
+
+// enqueueMessage는 메시지와 첨부파일을 처리하여 세션 큐에 넣습니다.
+func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.MessageCreate, sess *session.Session) {
+	content := m.Content
+
+	// 첨부파일 처리
+	for _, att := range m.Attachments {
+		path, err := h.downloader.Download(att.URL, att.Filename)
+		if err == nil {
+			content += fmt.Sprintf("\n[첨부파일 참고: %s]", path)
+			log.Printf("첨부파일 다운로드 완료: %s", path)
+		} else {
+			log.Printf("첨부파일 다운로드 실패: %v", err)
+			content += fmt.Sprintf("\n[첨부파일 다운로드 실패: %s]", att.Filename)
+		}
+	}
+
+	if strings.TrimSpace(content) != "" {
+		sess.MsgChan <- content
+	}
+}
+
+// startSessionProcessor는 세션의 큐를 구독하여 디바운싱 처리 후 AI 응답을 트리거합니다.
+func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *session.Session) {
+	go func() {
+		var buffer []string
+		timer := time.NewTimer(time.Hour)
+		timer.Stop()
+
+		for {
+			select {
+			case msg := <-sess.MsgChan:
+				buffer = append(buffer, msg)
+				timer.Reset(debounceInterval)
+			case <-timer.C:
+				if len(buffer) > 0 {
+					prompt := strings.Join(buffer, "\n\n")
+					buffer = nil
+					go h.processAIResponse(s, sess.ThreadID, prompt, sess)
+				}
+			}
+		}
+	}()
 }
 
 // processAIResponse는 AI 응답을 생성하고 쓰레드에 전송합니다.
@@ -126,9 +185,15 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	go h.showTyping(ctx, s, threadID)
 
+	// 세션 모델 확인 (없으면 글로벌 모델 사용)
+	modelName := sess.GetModel()
+	if modelName == "" {
+		modelName = h.config.GetGlobalModel()
+	}
+
 	// Antigravity CLI 호출
 	conversationID := sess.GetConversationID()
-	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, conversationID, threadID)
+	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
 	if err != nil {
 		log.Printf("AI 응답 생성 실패: %v", err)
 		h.sendErrorMessage(s, threadID, err)

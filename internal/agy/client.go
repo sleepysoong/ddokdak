@@ -12,7 +12,6 @@ import (
 
 // Client wraps the agy CLI to send prompts and receive AI responses.
 type Client struct {
-	model   string
 	timeout string
 	logDir  string
 }
@@ -22,9 +21,8 @@ type Client struct {
 // model is the AI model name to use (e.g. "gemini-2.5-pro").
 // timeout is the print timeout duration string (e.g. "120").
 // logDir is the directory where per-thread log files are stored.
-func NewClient(model, timeout, logDir string) *Client {
+func NewClient(timeout, logDir string) *Client {
 	return &Client{
-		model:   model,
 		timeout: timeout,
 		logDir:  logDir,
 	}
@@ -33,11 +31,11 @@ func NewClient(model, timeout, logDir string) *Client {
 // buildCommand constructs the exec.Cmd for the agy CLI invocation.
 // threadID is used to derive the log file name.
 // If conversationID is non-empty, the --conversation flag is appended.
-func (c *Client) buildCommand(ctx context.Context, prompt, threadID, conversationID string) *exec.Cmd {
+func (c *Client) buildCommand(ctx context.Context, prompt, model, threadID, conversationID string) *exec.Cmd {
 	logFile := filepath.Join(c.logDir, threadID+".log")
 
 	args := []string{
-		"--model", c.model,
+		"--model", model,
 		"--print-timeout", c.timeout,
 		"--log-file", logFile,
 		"--dangerously-skip-permissions",
@@ -68,7 +66,7 @@ func parseResponse(stdout string) string {
 //
 // It returns the response text, the conversation ID (equal to threadID for
 // tracking purposes), and any error that occurred.
-func (c *Client) Execute(ctx context.Context, prompt, conversationID, threadID string) (response string, newConversationID string, err error) {
+func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, threadID string) (response string, newConversationID string, err error) {
 	if prompt == "" {
 		return "", "", fmt.Errorf("agy: prompt must not be empty")
 	}
@@ -77,7 +75,7 @@ func (c *Client) Execute(ctx context.Context, prompt, conversationID, threadID s
 		return "", "", fmt.Errorf("agy: threadID must not be empty")
 	}
 
-	cmd := c.buildCommand(ctx, prompt, threadID, conversationID)
+	cmd := c.buildCommand(ctx, prompt, model, threadID, conversationID)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
@@ -105,10 +103,10 @@ func (c *Client) Execute(ctx context.Context, prompt, conversationID, threadID s
 // ExecuteWithContinuation runs an agy CLI invocation that continues
 // an existing conversation. It is a convenience wrapper around Execute
 // that requires a non-empty conversationID.
-func (c *Client) ExecuteWithContinuation(ctx context.Context, prompt, conversationID, threadID string) (string, string, error) {
+func (c *Client) ExecuteWithContinuation(ctx context.Context, prompt, model, conversationID, threadID string) (string, string, error) {
 	if conversationID == "" {
 		return "", "", fmt.Errorf("agy: conversationID is required for continuation")
 	}
 
-	return c.Execute(ctx, prompt, conversationID, threadID)
+	return c.Execute(ctx, prompt, model, conversationID, threadID)
 }
