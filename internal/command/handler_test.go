@@ -12,7 +12,7 @@ import (
 func TestNewHandler(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
 	cfg := &config.Config{}
-	sm := session.NewSessionManager()
+	sm := session.NewSessionManager(t.TempDir())
 	dashboard := usage.NewDashboard(usage.NewTracker())
 	handler := NewHandler(channelStore, cfg, sm, dashboard)
 
@@ -28,7 +28,7 @@ func TestNewHandler(t *testing.T) {
 func TestHandlerHasChannelStore(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
 	cfg := &config.Config{}
-	sm := session.NewSessionManager()
+	sm := session.NewSessionManager(t.TempDir())
 	dashboard := usage.NewDashboard(usage.NewTracker())
 	handler := NewHandler(channelStore, cfg, sm, dashboard)
 

@@ -18,10 +18,12 @@ var kst = time.FixedZone("KST", 9*60*60)
 
 // ModelUsage는 모델별 사용 통계입니다.
 type ModelUsage struct {
-	ModelName  string
-	CallCount  int64
-	LastUsedAt time.Time
-	ErrorCount int64
+	ModelName    string
+	CallCount    int64
+	InputTokens  int64
+	OutputTokens int64
+	LastUsedAt   time.Time
+	ErrorCount   int64
 }
 
 // Tracker는 모델별 사용량을 추적합니다.
@@ -39,8 +41,8 @@ func NewTracker() *Tracker {
 	}
 }
 
-// RecordCall은 모델 호출을 기록합니다.
-func (t *Tracker) RecordCall(modelName string) {
+// RecordCall은 모델 호출과 토큰 사용량을 기록합니다.
+func (t *Tracker) RecordCall(modelName string, inputTokens, outputTokens int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -51,6 +53,8 @@ func (t *Tracker) RecordCall(modelName string) {
 	}
 
 	u.CallCount++
+	u.InputTokens += inputTokens
+	u.OutputTokens += outputTokens
 	u.LastUsedAt = time.Now()
 }
 
@@ -126,6 +130,7 @@ func (t *Tracker) FormatDashboard() string {
 		for _, u := range usages {
 			sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
 			sb.WriteString(fmt.Sprintf("├ 호출: %d회 | 오류: %d회\n", u.CallCount, u.ErrorCount))
+			sb.WriteString(fmt.Sprintf("├ 입력 토큰: ~%d | 출력 토큰: ~%d\n", u.InputTokens, u.OutputTokens))
 			sb.WriteString(fmt.Sprintf("└ 마지막 사용: %s\n\n", formatTimeSince(u.LastUsedAt)))
 		}
 	}

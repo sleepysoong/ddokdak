@@ -25,8 +25,10 @@ type sessionData struct {
 
 // NewSessionManager creates and returns a new SessionManager.
 // It also loads any existing sessions from disk.
-func NewSessionManager() *SessionManager {
-	dataDir := filepath.Join(".", "data")
+func NewSessionManager(dataDir string) *SessionManager {
+	if dataDir == "" {
+		dataDir = filepath.Join(".", "data")
+	}
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Printf("Failed to create data directory: %v", err)
 	}

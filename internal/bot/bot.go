@@ -54,7 +54,7 @@ func New(cfg *config.Config) (*Bot, error) {
 
 	// 의존성 초기화
 	channelStore := store.NewInMemoryChannelStore()
-	sessionManager := session.NewSessionManager()
+	sessionManager := session.NewSessionManager(filepath.Join(".", "data"))
 	agyClient := agy.NewClient(
 		fmt.Sprintf("%s", cfg.AgyTimeout),
 		logDir,
@@ -90,6 +90,7 @@ func (b *Bot) Start() error {
 	// 이벤트 핸들러 등록
 	b.session.AddHandler(b.commandHandler.HandleInteraction)
 	b.session.AddHandler(b.messageHandler.HandleMessage)
+	b.session.AddHandler(b.messageHandler.HandleMessageDelete)
 
 	// 봇 준비 완료 핸들러
 	b.session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {

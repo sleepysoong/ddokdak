@@ -20,14 +20,23 @@ type Session struct {
 	// Model is the specific model to use for this session.
 	// If empty, the global model will be used.
 	Model string
-	// MsgChan is used to queue messages for debouncing.
-	MsgChan chan string
+	
+	pendingMu sync.Mutex
+	pending   []QueuedMessage
+	notify    chan struct{}
+
 	// CreatedAt is the time the session was created.
 	CreatedAt time.Time
 	// LastActiveAt is the time the session was last active.
 	LastActiveAt time.Time
 
 	mu sync.Mutex
+}
+
+// QueuedMessage represents a message waiting to be processed.
+type QueuedMessage struct {
+	ID      string
+	Content string
 }
 
 // NewSession creates a new Session for the given Discord thread ID.
@@ -38,10 +47,63 @@ func NewSession(threadID string) *Session {
 		ThreadID:       threadID,
 		ConversationID: "",
 		Model:          "",
-		MsgChan:        make(chan string, 100),
+		pending:        make([]QueuedMessage, 0),
+		notify:         make(chan struct{}, 1),
 		CreatedAt:      now,
 		LastActiveAt:   now,
 	}
+}
+
+// NotifyChan returns the notification channel.
+func (s *Session) NotifyChan() <-chan struct{} {
+	return s.notify
+}
+
+// Enqueue adds a message to the queue and triggers a notification.
+func (s *Session) Enqueue(msgID, content string) {
+	s.pendingMu.Lock()
+	s.pending = append(s.pending, QueuedMessage{ID: msgID, Content: content})
+	s.pendingMu.Unlock()
+
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+// RemoveMessage removes a message from the queue by ID and triggers a notification.
+func (s *Session) RemoveMessage(msgID string) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	for i, msg := range s.pending {
+		if msg.ID == msgID {
+			s.pending = append(s.pending[:i], s.pending[i+1:]...)
+			break
+		}
+	}
+
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
+// GetAndClearPending returns all pending messages and clears the queue.
+func (s *Session) GetAndClearPending() []QueuedMessage {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+
+	res := s.pending
+	s.pending = make([]QueuedMessage, 0)
+	return res
+}
+
+// GetPendingCount returns the number of pending messages.
+func (s *Session) GetPendingCount() int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return len(s.pending)
 }
 
 // UpdateLastActive updates the session's last active timestamp to now.

@@ -8,7 +8,7 @@ import (
 )
 
 func TestCreateSession(t *testing.T) {
-	m := NewSessionManager()
+	m := NewSessionManager(t.TempDir())
 	threadID := "thread-123"
 
 	s := m.CreateSession(threadID)
@@ -34,7 +34,7 @@ func TestCreateSession(t *testing.T) {
 }
 
 func TestGetSession(t *testing.T) {
-	m := NewSessionManager()
+	m := NewSessionManager(t.TempDir())
 	threadID := "thread-456"
 
 	// Should not exist yet.
@@ -55,7 +55,7 @@ func TestGetSession(t *testing.T) {
 }
 
 func TestRemoveSession(t *testing.T) {
-	m := NewSessionManager()
+	m := NewSessionManager(t.TempDir())
 	threadID := "thread-789"
 
 	m.CreateSession(threadID)
@@ -72,7 +72,7 @@ func TestRemoveSession(t *testing.T) {
 }
 
 func TestSetConversationID(t *testing.T) {
-	m := NewSessionManager()
+	m := NewSessionManager(t.TempDir())
 	threadID := "thread-conv"
 
 	s := m.CreateSession(threadID)
@@ -132,7 +132,7 @@ func TestUUIDUniqueness(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	m := NewSessionManager()
+	m := NewSessionManager(t.TempDir())
 	const goroutines = 100
 
 	var wg sync.WaitGroup

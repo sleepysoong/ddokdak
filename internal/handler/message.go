@@ -154,55 +154,44 @@ func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.Messa
 	}
 
 	if strings.TrimSpace(content) != "" {
-		sess.MsgChan <- content
+		sess.Enqueue(m.ID, content)
 	}
 }
 
 // startSessionProcessor는 세션의 큐를 구독하여 디바운싱 처리 후 AI 응답을 트리거합니다.
-// AI 응답이 완료될 때까지 새 메시지는 MsgChan 버퍼에 쌓이며 순차적으로 처리됩니다.
 func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *session.Session) {
 	go func() {
-		var buffer []string
 		timer := time.NewTimer(time.Hour)
 		timer.Stop()
 
 		for {
 			select {
-			case msg := <-sess.MsgChan:
-				buffer = append(buffer, msg)
-				timer.Reset(debounceInterval)
+			case <-sess.NotifyChan():
+				count := sess.GetPendingCount()
+				if count > 0 {
+					timer.Reset(debounceInterval)
+				} else {
+					timer.Stop()
+				}
 			case <-timer.C:
-				if len(buffer) > 0 {
-					prompt := strings.Join(buffer, "\n\n")
-					buffer = nil
-					// 동기 실행: AI 응답이 끝날 때까지 블로킹됩니다.
-					// 응답 중에 들어온 메시지는 MsgChan 버퍼(cap 100)에 쌓이고,
-					// 응답 완료 후 다시 루프가 돌면서 꺼내 처리합니다.
+				msgs := sess.GetAndClearPending()
+				if len(msgs) > 0 {
+					var contents []string
+					for _, m := range msgs {
+						contents = append(contents, m.Content)
+					}
+					prompt := strings.Join(contents, "\n\n")
+
 					h.processAIResponse(s, sess.ThreadID, prompt, sess)
 
-					// AI 응답 완료 후 대기 중인 메시지를 즉시 수거
-					h.drainPendingMessages(sess, &buffer, timer)
+					// 응답 후 대기 중인 새 메시지가 있으면 타이머 재가동
+					if sess.GetPendingCount() > 0 {
+						timer.Reset(debounceInterval)
+					}
 				}
 			}
 		}
 	}()
-}
-
-// drainPendingMessages는 AI 응답 완료 직후 MsgChan에 쌓인 메시지를 논블로킹으로 수거합니다.
-// 수거된 메시지가 있으면 디바운싱 타이머를 다시 시작합니다.
-func (h *MessageHandler) drainPendingMessages(sess *session.Session, buffer *[]string, timer *time.Timer) {
-	for {
-		select {
-		case msg := <-sess.MsgChan:
-			*buffer = append(*buffer, msg)
-		default:
-			// 채널이 비었으면 수거 완료
-			if len(*buffer) > 0 {
-				timer.Reset(debounceInterval)
-			}
-			return
-		}
-	}
 }
 
 // processAIResponse는 AI 응답을 생성하고 쓰레드에 전송합니다.
@@ -221,8 +210,12 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	// Antigravity CLI 호출
 	conversationID := sess.GetConversationID()
-	h.usageTracker.RecordCall(modelName)
 	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
+	
+	// 간단한 토큰 어림계산 (한글 비중 고려)
+	inputTokens := int64(len([]rune(prompt)) / 2)
+	outputTokens := int64(len([]rune(response)) / 2)
+	h.usageTracker.RecordCall(modelName, inputTokens, outputTokens)
 	if err != nil {
 		h.usageTracker.RecordError(modelName)
 		log.Printf("AI 응답 생성 실패: %v", err)
@@ -338,4 +331,17 @@ func splitMessage(content string, maxLen int) []string {
 	}
 
 	return messages
+}
+// HandleMessageDelete는 메시지가 삭제되었을 때 처리하는 핸들러입니다.
+func (h *MessageHandler) HandleMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
+	// 봇 자신이 보낸 메시지는 무시
+	if m.Message != nil && m.Message.Author != nil && m.Message.Author.ID == s.State.User.ID {
+		return
+	}
+
+	// 현재 삭제된 메시지가 쓰레드 안에 있는지 세션 확인
+	sess, exists := h.sessionManager.GetSession(m.ChannelID)
+	if exists {
+		sess.RemoveMessage(m.ID)
+	}
 }
