@@ -143,6 +143,7 @@ func (h *Handler) handleModelChange(s *discordgo.Session, i *discordgo.Interacti
 		}
 
 		sess.SetModel(modelName)
+		h.sessionManager.Save()
 		h.respond(s, i, fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
 		return
 	}

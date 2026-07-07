@@ -5,10 +5,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var uuidRegex = regexp.MustCompile(`(?i)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
 
 // Client wraps the agy CLI to send prompts and receive AI responses.
 type Client struct {
@@ -94,10 +98,42 @@ func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, thr
 		return "", "", fmt.Errorf("agy: received empty response")
 	}
 
-	// Use threadID as the conversation identifier for log-based tracking.
-	newConversationID = threadID
+	// If conversationID was provided and valid, return it.
+	if conversationID != "" {
+		newConversationID = conversationID
+	} else {
+		// Attempt to extract the newly created conversation ID from the log file.
+		logFile := filepath.Join(c.logDir, threadID+".log")
+		newConversationID = extractConversationID(logFile)
+		if newConversationID == "" {
+			// Fallback (might not work for continuing, but better than nothing)
+			newConversationID = threadID
+		}
+	}
 
 	return response, newConversationID, nil
+}
+
+// extractConversationID attempts to find the conversation UUID in the log file.
+func extractConversationID(logFile string) string {
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		return ""
+	}
+	
+	// agy logs usually contain: Created conversation <uuid>
+	// or Print mode: conversation=<uuid>
+	lines := strings.Split(string(content), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.Contains(line, "Created conversation") || strings.Contains(line, "Print mode: conversation=") {
+			matches := uuidRegex.FindStringSubmatch(line)
+			if len(matches) > 1 {
+				return matches[1]
+			}
+		}
+	}
+	return ""
 }
 
 // ExecuteWithContinuation runs an agy CLI invocation that continues

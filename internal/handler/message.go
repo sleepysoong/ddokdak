@@ -234,6 +234,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	if newConversationID != "" && conversationID == "" {
 		sess.SetConversationID(newConversationID)
 		log.Printf("대화 ID 설정: ThreadID=%s, ConversationID=%s", threadID, newConversationID)
+		h.sessionManager.Save()
 	}
 
 	// 응답 전송
