@@ -8,6 +8,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/config"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
+	"github.com/sleepysoong/ddokdak/internal/usage"
 )
 
 // Handler는 슬래시 커맨드를 처리하는 핸들러입니다.
@@ -15,14 +16,16 @@ type Handler struct {
 	channelStore   store.ChannelStore
 	config         *config.Config
 	sessionManager *session.SessionManager
+	dashboard      *usage.Dashboard
 }
 
 // NewHandler는 새로운 커맨드 핸들러를 생성합니다.
-func NewHandler(channelStore store.ChannelStore, cfg *config.Config, sm *session.SessionManager) *Handler {
+func NewHandler(channelStore store.ChannelStore, cfg *config.Config, sm *session.SessionManager, dashboard *usage.Dashboard) *Handler {
 	return &Handler{
 		channelStore:   channelStore,
 		config:         cfg,
 		sessionManager: sm,
+		dashboard:      dashboard,
 	}
 }
 
@@ -41,6 +44,8 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 		h.handleUnsetChannel(s, i)
 	case "모델변경":
 		h.handleModelChange(s, i)
+	case "사용량":
+		h.handleUsage(s, i)
 	}
 }
 
@@ -140,6 +145,17 @@ func (h *Handler) handleModelChange(s *discordgo.Session, i *discordgo.Interacti
 		sess.SetModel(modelName)
 		h.respond(s, i, fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
 		return
+	}
+}
+
+// handleUsage는 /사용량 커맨드를 처리합니다.
+func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// 먼저 인터랙션에 응답
+	h.respond(s, i, "📊 사용량 대시보드를 생성합니다...")
+
+	// 대시보드 시작 (해당 채널에 메시지 전송 + 1분마다 자동 업데이트)
+	if err := h.dashboard.StartDashboard(s, i.ChannelID); err != nil {
+		log.Printf("사용량 대시보드 시작 실패: %v", err)
 	}
 }
 

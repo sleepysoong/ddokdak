@@ -59,6 +59,10 @@ var commands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:        "사용량",
+		Description: "AI 모델별 사용량 대시보드를 표시합니다. 1분마다 자동으로 업데이트됩니다.",
+	},
 }
 
 // RegisterCommands는 디스코드 서버에 슬래시 커맨드를 등록합니다.

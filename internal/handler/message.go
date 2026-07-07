@@ -15,6 +15,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/downloader"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
+	"github.com/sleepysoong/ddokdak/internal/usage"
 )
 
 const (
@@ -38,6 +39,7 @@ type MessageHandler struct {
 	agyClient      *agy.Client
 	config         *config.Config
 	downloader     *downloader.Downloader
+	usageTracker   *usage.Tracker
 }
 
 // NewMessageHandler는 새로운 메시지 핸들러를 생성합니다.
@@ -47,6 +49,7 @@ func NewMessageHandler(
 	agyClient *agy.Client,
 	cfg *config.Config,
 	dl *downloader.Downloader,
+	ut *usage.Tracker,
 ) *MessageHandler {
 	return &MessageHandler{
 		channelStore:   channelStore,
@@ -54,6 +57,7 @@ func NewMessageHandler(
 		agyClient:      agyClient,
 		config:         cfg,
 		downloader:     dl,
+		usageTracker:   ut,
 	}
 }
 
@@ -155,6 +159,7 @@ func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.Messa
 }
 
 // startSessionProcessor는 세션의 큐를 구독하여 디바운싱 처리 후 AI 응답을 트리거합니다.
+// AI 응답이 완료될 때까지 새 메시지는 MsgChan 버퍼에 쌓이며 순차적으로 처리됩니다.
 func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *session.Session) {
 	go func() {
 		var buffer []string
@@ -170,11 +175,34 @@ func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *sessi
 				if len(buffer) > 0 {
 					prompt := strings.Join(buffer, "\n\n")
 					buffer = nil
-					go h.processAIResponse(s, sess.ThreadID, prompt, sess)
+					// 동기 실행: AI 응답이 끝날 때까지 블로킹됩니다.
+					// 응답 중에 들어온 메시지는 MsgChan 버퍼(cap 100)에 쌓이고,
+					// 응답 완료 후 다시 루프가 돌면서 꺼내 처리합니다.
+					h.processAIResponse(s, sess.ThreadID, prompt, sess)
+
+					// AI 응답 완료 후 대기 중인 메시지를 즉시 수거
+					h.drainPendingMessages(sess, &buffer, timer)
 				}
 			}
 		}
 	}()
+}
+
+// drainPendingMessages는 AI 응답 완료 직후 MsgChan에 쌓인 메시지를 논블로킹으로 수거합니다.
+// 수거된 메시지가 있으면 디바운싱 타이머를 다시 시작합니다.
+func (h *MessageHandler) drainPendingMessages(sess *session.Session, buffer *[]string, timer *time.Timer) {
+	for {
+		select {
+		case msg := <-sess.MsgChan:
+			*buffer = append(*buffer, msg)
+		default:
+			// 채널이 비었으면 수거 완료
+			if len(*buffer) > 0 {
+				timer.Reset(debounceInterval)
+			}
+			return
+		}
+	}
 }
 
 // processAIResponse는 AI 응답을 생성하고 쓰레드에 전송합니다.
@@ -193,8 +221,10 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	// Antigravity CLI 호출
 	conversationID := sess.GetConversationID()
+	h.usageTracker.RecordCall(modelName)
 	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
 	if err != nil {
+		h.usageTracker.RecordError(modelName)
 		log.Printf("AI 응답 생성 실패: %v", err)
 		h.sendErrorMessage(s, threadID, err)
 		return

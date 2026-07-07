@@ -17,6 +17,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/handler"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
+	"github.com/sleepysoong/ddokdak/internal/usage"
 )
 
 // Bot은 디스코드 봇의 핵심 구조체입니다.
@@ -28,6 +29,7 @@ type Bot struct {
 	agyClient          *agy.Client
 	commandHandler     *command.Handler
 	messageHandler     *handler.MessageHandler
+	dashboard          *usage.Dashboard
 	registeredCommands []*discordgo.ApplicationCommand
 }
 
@@ -64,8 +66,12 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("다운로더 초기화 실패: %w", err)
 	}
 
-	commandHandler := command.NewHandler(channelStore, cfg, sessionManager)
-	messageHandler := handler.NewMessageHandler(channelStore, sessionManager, agyClient, cfg, dl)
+	// 사용량 추적 초기화
+	usageTracker := usage.NewTracker()
+	dashboard := usage.NewDashboard(usageTracker)
+
+	commandHandler := command.NewHandler(channelStore, cfg, sessionManager, dashboard)
+	messageHandler := handler.NewMessageHandler(channelStore, sessionManager, agyClient, cfg, dl, usageTracker)
 
 	return &Bot{
 		session:        dg,
@@ -75,6 +81,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		agyClient:      agyClient,
 		commandHandler: commandHandler,
 		messageHandler: messageHandler,
+		dashboard:      dashboard,
 	}, nil
 }
 
@@ -117,6 +124,9 @@ func (b *Bot) Wait() {
 // Stop은 봇을 종료합니다.
 func (b *Bot) Stop() error {
 	log.Println("봇을 종료합니다...")
+
+	// 대시보드 자동 업데이트 중지
+	b.dashboard.StopAllDashboards()
 
 	// 슬래시 커맨드 해제
 	if err := command.UnregisterCommands(b.session, "", b.registeredCommands); err != nil {
