@@ -121,7 +121,6 @@ func TestConcurrency(t *testing.T) {
 	s := NewInMemoryChannelStore()
 	var wg sync.WaitGroup
 
-	// 동시에 여러 고루틴에서 채널 추가
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -143,7 +142,6 @@ func TestConcurrency(t *testing.T) {
 		t.Fatalf("expected 100 total channels, got %d", totalChannels)
 	}
 
-	// 동시에 읽기/쓰기 혼합 작업
 	for i := 0; i < 100; i++ {
 		wg.Add(3)
 		go func(i int) {

@@ -32,7 +32,6 @@ func TestHandlerHasChannelStore(t *testing.T) {
 	dashboard := usage.NewDashboard(usage.NewTracker())
 	handler := NewHandler(channelStore, cfg, sm, dashboard)
 
-	// channelStore가 올바르게 설정되었는지 확인
 	if handler.channelStore != channelStore {
 		t.Error("channelStore가 올바르게 설정되지 않았습니다")
 	}

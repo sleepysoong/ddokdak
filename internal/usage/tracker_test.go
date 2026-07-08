@@ -220,7 +220,6 @@ func TestConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines * 3) // RecordCall, RecordError, GetUsages 각각
 
-	// 동시에 RecordCall 호출
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
@@ -230,7 +229,6 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 
-	// 동시에 RecordError 호출
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
@@ -240,7 +238,6 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 
-	// 동시에 GetUsages 호출
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()

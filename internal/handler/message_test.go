@@ -96,7 +96,6 @@ func TestSplitMessage(t *testing.T) {
 				t.Errorf("splitMessage() 첫 번째 부분 = %q, 기대값 %q",
 					parts[0], tt.checkFirstPart)
 			}
-			// 모든 부분이 최대 길이 이하인지 확인
 			for i, part := range parts {
 				if len(part) > tt.maxLen {
 					t.Errorf("splitMessage() 부분 %d 길이(%d)가 최대 길이(%d)를 초과",

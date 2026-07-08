@@ -138,7 +138,6 @@ func TestConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines * 3)
 
-	// Concurrent creates.
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
@@ -147,7 +146,6 @@ func TestConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 
-	// Concurrent reads.
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
@@ -156,7 +154,6 @@ func TestConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 
-	// Concurrent deletes (on some of the threads).
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
