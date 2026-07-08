@@ -29,7 +29,6 @@ func (d *Downloader) Download(url, filename string) (string, error) {
 	safeFilename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), sanitizeFilename(filename))
 	destPath := filepath.Join(d.baseDir, safeFilename)
 
-	// HTTP GET 요청
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("파일 다운로드 요청 실패: %w", err)
@@ -40,14 +39,12 @@ func (d *Downloader) Download(url, filename string) (string, error) {
 		return "", fmt.Errorf("파일 다운로드 실패 (상태 코드: %d)", resp.StatusCode)
 	}
 
-	// 로컬 파일 생성
 	out, err := os.Create(destPath)
 	if err != nil {
 		return "", fmt.Errorf("로컬 파일 생성 실패: %w", err)
 	}
 	defer out.Close()
 
-	// 내용 복사
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return "", fmt.Errorf("파일 내용 저장 실패: %w", err)
 	}

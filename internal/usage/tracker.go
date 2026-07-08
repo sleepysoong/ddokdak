@@ -175,7 +175,6 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 
 	d.mu.Unlock()
 
-	// 새 대시보드 메시지 전송
 	content := d.tracker.FormatDashboard()
 	msg, err := s.ChannelMessageSend(channelID, content)
 	if err != nil {

@@ -35,30 +35,23 @@ type Bot struct {
 
 // New는 새로운 Bot 인스턴스를 생성합니다.
 func New(cfg *config.Config) (*Bot, error) {
-	// 디스코드 세션 생성
 	dg, err := discordgo.New("Bot " + cfg.DiscordToken)
 	if err != nil {
 		return nil, fmt.Errorf("디스코드 세션 생성 실패: %w", err)
 	}
 
-	// 필요한 인텐트 설정
 	dg.Identify.Intents = discordgo.IntentsGuildMessages |
 		discordgo.IntentsMessageContent |
 		discordgo.IntentsGuilds
 
-	// 로그 디렉토리 생성
 	logDir := filepath.Join(".", "logs")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, fmt.Errorf("로그 디렉토리 생성 실패: %w", err)
 	}
 
-	// 의존성 초기화
 	channelStore := store.NewInMemoryChannelStore()
 	sessionManager := session.NewSessionManager(filepath.Join(".", "data"))
-	agyClient := agy.NewClient(
-		fmt.Sprintf("%s", cfg.AgyTimeout),
-		logDir,
-	)
+	agyClient := agy.NewClient(cfg.AgyTimeout.String(), logDir)
 
 	dlDir := filepath.Join(".", "downloads")
 	dl, err := downloader.New(dlDir)
@@ -66,7 +59,6 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("다운로더 초기화 실패: %w", err)
 	}
 
-	// 사용량 추적 초기화
 	usageTracker := usage.NewTracker()
 	dashboard := usage.NewDashboard(usageTracker)
 
@@ -87,22 +79,18 @@ func New(cfg *config.Config) (*Bot, error) {
 
 // Start는 봇을 시작합니다.
 func (b *Bot) Start() error {
-	// 이벤트 핸들러 등록
 	b.session.AddHandler(b.commandHandler.HandleInteraction)
 	b.session.AddHandler(b.messageHandler.HandleMessage)
 	b.session.AddHandler(b.messageHandler.HandleMessageDelete)
 
-	// 봇 준비 완료 핸들러
 	b.session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		log.Printf("봇이 %s#%s로 로그인했습니다.", r.User.Username, r.User.Discriminator)
 	})
 
-	// 디스코드 연결
 	if err := b.session.Open(); err != nil {
 		return fmt.Errorf("디스코드 연결 실패: %w", err)
 	}
 
-	// 슬래시 커맨드 등록
 	registeredCommands, err := command.RegisterCommands(b.session, "")
 	if err != nil {
 		return fmt.Errorf("슬래시 커맨드 등록 실패: %w", err)

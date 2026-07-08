@@ -20,7 +20,7 @@ type Session struct {
 	// Model is the specific model to use for this session.
 	// If empty, the global model will be used.
 	Model string
-	
+
 	pendingMu sync.Mutex
 	pending   []QueuedMessage
 	notify    chan struct{}
@@ -43,14 +43,12 @@ type QueuedMessage struct {
 func NewSession(threadID string) *Session {
 	now := time.Now()
 	return &Session{
-		ID:             generateUUID(),
-		ThreadID:       threadID,
-		ConversationID: "",
-		Model:          "",
-		pending:        make([]QueuedMessage, 0),
-		notify:         make(chan struct{}, 1),
-		CreatedAt:      now,
-		LastActiveAt:   now,
+		ID:           generateUUID(),
+		ThreadID:     threadID,
+		pending:      make([]QueuedMessage, 0),
+		notify:       make(chan struct{}, 1),
+		CreatedAt:    now,
+		LastActiveAt: now,
 	}
 }
 

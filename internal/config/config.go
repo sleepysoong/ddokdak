@@ -9,21 +9,19 @@ import (
 	"time"
 )
 
-// 환경변수 키 상수
 const (
-	envDiscordToken    = "DISCORD_TOKEN"
-	envAgyModel        = "AGY_MODEL"
+	envDiscordToken     = "DISCORD_TOKEN"
+	envAgyModel         = "AGY_MODEL"
 	envAgyFallbackModel = "AGY_FALLBACK_MODEL"
-	envAgyTimeout      = "AGY_TIMEOUT"
-	envLogLevel        = "LOG_LEVEL"
+	envAgyTimeout       = "AGY_TIMEOUT"
+	envLogLevel         = "LOG_LEVEL"
 )
 
-// 기본값 상수
 const (
-	DefaultAgyModel        = "Claude Opus 4.6 (Thinking)"
+	DefaultAgyModel         = "Claude Opus 4.6 (Thinking)"
 	DefaultAgyFallbackModel = "Gemini 3.1 Pro (High)"
-	DefaultAgyTimeout      = "5m"
-	DefaultLogLevel        = "info"
+	DefaultAgyTimeout       = "5m"
+	DefaultLogLevel         = "info"
 )
 
 // Config는 ddokdak 봇의 전체 설정을 담는 구조체입니다.

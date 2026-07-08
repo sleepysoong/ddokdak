@@ -151,10 +151,8 @@ func (h *Handler) handleModelChange(s *discordgo.Session, i *discordgo.Interacti
 
 // handleUsage는 /사용량 커맨드를 처리합니다.
 func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// 먼저 인터랙션에 응답
 	h.respond(s, i, "📊 사용량 대시보드를 생성합니다...")
 
-	// 대시보드 시작 (해당 채널에 메시지 전송 + 1분마다 자동 업데이트)
 	if err := h.dashboard.StartDashboard(s, i.ChannelID); err != nil {
 		log.Printf("사용량 대시보드 시작 실패: %v", err)
 	}

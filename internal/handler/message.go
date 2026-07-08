@@ -63,28 +63,23 @@ func NewMessageHandler(
 
 // HandleMessage는 메시지 생성 이벤트를 처리합니다.
 func (h *MessageHandler) HandleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// 봇 자신의 메시지 무시
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
 
-	// 봇 메시지 무시
 	if m.Author.Bot {
 		return
 	}
 
-	// 쓰레드 내 메시지 처리
 	if m.GuildID != "" && isThreadChannel(m.ChannelID, s) {
 		h.handleThreadMessage(s, m)
 		return
 	}
 
-	// 지정된 채널인지 확인
 	if m.GuildID == "" || !h.channelStore.IsRegistered(m.GuildID, m.ChannelID) {
 		return
 	}
 
-	// 새 쓰레드 생성 및 AI 응답
 	h.handleNewConversation(s, m)
 }
 
@@ -107,14 +102,11 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 		return
 	}
 
-	// 세션 생성
 	sess := h.sessionManager.CreateSession(thread.ID)
 	log.Printf("새 세션 생성: ThreadID=%s, SessionID=%s", thread.ID, sess.ID)
 
-	// 세션 프로세서 시작
 	h.startSessionProcessor(s, sess)
 
-	// 메시지 큐에 추가
 	h.enqueueMessage(s, m, sess)
 }
 
@@ -122,7 +114,6 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 func (h *MessageHandler) handleThreadMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	threadID := m.ChannelID
 
-	// 세션 확인
 	sess, exists := h.sessionManager.GetSession(threadID)
 	if !exists {
 		// 봇 재시작 등으로 세션이 메모리에 없다면 새로 생성하여 처리 이어나감
@@ -130,10 +121,8 @@ func (h *MessageHandler) handleThreadMessage(s *discordgo.Session, m *discordgo.
 		h.startSessionProcessor(s, sess)
 	}
 
-	// 마지막 활동 시간 갱신
 	sess.UpdateLastActive()
 
-	// 메시지 큐에 추가
 	h.enqueueMessage(s, m, sess)
 }
 
@@ -141,7 +130,6 @@ func (h *MessageHandler) handleThreadMessage(s *discordgo.Session, m *discordgo.
 func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.MessageCreate, sess *session.Session) {
 	content := m.Content
 
-	// 첨부파일 처리
 	for _, att := range m.Attachments {
 		path, err := h.downloader.Download(att.URL, att.Filename)
 		if err == nil {
@@ -196,7 +184,6 @@ func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *sessi
 
 // processAIResponse는 AI 응답을 생성하고 쓰레드에 전송합니다.
 func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string, prompt string, sess *session.Session) {
-	// 타이핑 인디케이터 시작
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -208,10 +195,9 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		modelName = h.config.GetGlobalModel()
 	}
 
-	// Antigravity CLI 호출
 	conversationID := sess.GetConversationID()
 	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
-	
+
 	// 간단한 토큰 어림계산 (한글 비중 고려)
 	inputTokens := int64(len([]rune(prompt)) / 2)
 	outputTokens := int64(len([]rune(response)) / 2)
@@ -223,14 +209,12 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		return
 	}
 
-	// 대화 ID 업데이트
 	if newConversationID != "" && conversationID == "" {
 		sess.SetConversationID(newConversationID)
 		log.Printf("대화 ID 설정: ThreadID=%s, ConversationID=%s", threadID, newConversationID)
 		h.sessionManager.Save()
 	}
 
-	// 응답 전송
 	h.sendResponse(s, threadID, response)
 }
 
@@ -332,14 +316,13 @@ func splitMessage(content string, maxLen int) []string {
 
 	return messages
 }
+
 // HandleMessageDelete는 메시지가 삭제되었을 때 처리하는 핸들러입니다.
 func (h *MessageHandler) HandleMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
-	// 봇 자신이 보낸 메시지는 무시
 	if m.Message != nil && m.Message.Author != nil && m.Message.Author.ID == s.State.User.ID {
 		return
 	}
 
-	// 현재 삭제된 메시지가 쓰레드 안에 있는지 세션 확인
 	sess, exists := h.sessionManager.GetSession(m.ChannelID)
 	if exists {
 		sess.RemoveMessage(m.ID)
