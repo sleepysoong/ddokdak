@@ -165,7 +165,7 @@ func TestExecute_EmptyPrompt(t *testing.T) {
 	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.Execute(ctx, "", "model", "", "thread-1")
+	_, _, _, err := c.Execute(ctx, "", "model", "", "thread-1")
 	if err == nil {
 		t.Error("expected error for empty prompt, got nil")
 	}
@@ -178,7 +178,7 @@ func TestExecute_EmptyThreadID(t *testing.T) {
 	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.Execute(ctx, "hello", "model", "", "")
+	_, _, _, err := c.Execute(ctx, "hello", "model", "", "")
 	if err == nil {
 		t.Error("expected error for empty threadID, got nil")
 	}
@@ -191,7 +191,7 @@ func TestExecuteWithContinuation_EmptyConversationID(t *testing.T) {
 	c := NewClient("60", "/logs")
 	ctx := context.Background()
 
-	_, _, err := c.ExecuteWithContinuation(ctx, "hello", "model", "", "thread-1")
+	_, _, _, err := c.ExecuteWithContinuation(ctx, "hello", "model", "", "thread-1")
 	if err == nil {
 		t.Error("expected error for empty conversationID, got nil")
 	}
