@@ -203,11 +203,11 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	}
 
 	conversationID := sess.GetConversationID()
-	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
+	response, newConversationID, actualModel, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
 
-	h.usageTracker.RecordCall(modelName)
+	h.usageTracker.RecordCall(actualModel)
 	if err != nil {
-		h.usageTracker.RecordError(modelName)
+		h.usageTracker.RecordError(actualModel)
 		log.Printf("AI 응답 생성 실패: %v", err)
 		h.sendErrorMessage(s, threadID, err)
 		return
@@ -219,7 +219,18 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		h.sessionManager.Save()
 	}
 
+	if actualModel != "" && actualModel != sess.GetModel() {
+		sess.SetModel(actualModel)
+		h.sessionManager.Save()
+	}
+
 	h.sendResponse(s, threadID, response)
+
+	if actualModel != "" {
+		h.sendResponse(s, threadID, fmt.Sprintf("• %s", actualModel))
+	} else {
+		h.sendResponse(s, threadID, fmt.Sprintf("• %s", modelName))
+	}
 }
 
 // showTyping은 타이핑 인디케이터를 표시합니다.

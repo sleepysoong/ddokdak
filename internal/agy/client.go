@@ -70,13 +70,13 @@ func parseResponse(stdout string) string {
 //
 // It returns the response text, the conversation ID (equal to threadID for
 // tracking purposes), and any error that occurred.
-func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, threadID string) (response string, newConversationID string, err error) {
+func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, threadID string) (response string, newConversationID string, actualModel string, err error) {
 	if prompt == "" {
-		return "", "", fmt.Errorf("agy: prompt must not be empty")
+		return "", "", "", fmt.Errorf("agy: prompt must not be empty")
 	}
 
 	if threadID == "" {
-		return "", "", fmt.Errorf("agy: threadID must not be empty")
+		return "", "", "", fmt.Errorf("agy: threadID must not be empty")
 	}
 
 	cmd := c.buildCommand(ctx, prompt, model, threadID, conversationID)
@@ -88,22 +88,23 @@ func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, thr
 	if err := cmd.Run(); err != nil {
 		stderrText := strings.TrimSpace(stderrBuf.String())
 		if stderrText != "" {
-			return "", "", fmt.Errorf("agy: command failed: %w: %s", err, stderrText)
+			return "", "", "", fmt.Errorf("agy: command failed: %w: %s", err, stderrText)
 		}
-		return "", "", fmt.Errorf("agy: command failed: %w", err)
+		return "", "", "", fmt.Errorf("agy: command failed: %w", err)
 	}
 
 	response = parseResponse(stdoutBuf.String())
 	if response == "" {
-		return "", "", fmt.Errorf("agy: received empty response")
+		return "", "", "", fmt.Errorf("agy: received empty response")
 	}
 
+	logFile := filepath.Join(c.logDir, threadID+".log")
+	
 	// If conversationID was provided and valid, return it.
 	if conversationID != "" {
 		newConversationID = conversationID
 	} else {
 		// Attempt to extract the newly created conversation ID from the log file.
-		logFile := filepath.Join(c.logDir, threadID+".log")
 		newConversationID = extractConversationID(logFile)
 		if newConversationID == "" {
 			// Fallback (might not work for continuing, but better than nothing)
@@ -111,7 +112,12 @@ func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, thr
 		}
 	}
 
-	return response, newConversationID, nil
+	actualModel = extractModel(logFile)
+	if actualModel == "" {
+		actualModel = model // fallback
+	}
+
+	return response, newConversationID, actualModel, nil
 }
 
 // extractConversationID attempts to find the conversation UUID in the log file.
@@ -136,12 +142,32 @@ func extractConversationID(logFile string) string {
 	return ""
 }
 
+// extractModel attempts to find the actually used model in the log file.
+func extractModel(logFile string) string {
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		return ""
+	}
+	
+	// agy logs contain: Resolving model Gemini 3.5 Flash (High)
+	modelRegex := regexp.MustCompile(`(?i)Resolving model\s+(.+)`)
+	lines := strings.Split(string(content), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		matches := modelRegex.FindStringSubmatch(line)
+		if len(matches) > 1 {
+			return strings.TrimRight(matches[1], "\r\n")
+		}
+	}
+	return ""
+}
+
 // ExecuteWithContinuation runs an agy CLI invocation that continues
 // an existing conversation. It is a convenience wrapper around Execute
 // that requires a non-empty conversationID.
-func (c *Client) ExecuteWithContinuation(ctx context.Context, prompt, model, conversationID, threadID string) (string, string, error) {
+func (c *Client) ExecuteWithContinuation(ctx context.Context, prompt, model, conversationID, threadID string) (string, string, string, error) {
 	if conversationID == "" {
-		return "", "", fmt.Errorf("agy: conversationID is required for continuation")
+		return "", "", "", fmt.Errorf("agy: conversationID is required for continuation")
 	}
 
 	return c.Execute(ctx, prompt, model, conversationID, threadID)
