@@ -30,7 +30,8 @@ type Session struct {
 	// LastActiveAt is the time the session was last active.
 	LastActiveAt time.Time
 
-	mu sync.Mutex
+	mu               sync.Mutex
+	processorStarted bool
 }
 
 // QueuedMessage represents a message waiting to be processed.
@@ -132,11 +133,21 @@ func (s *Session) SetModel(model string) {
 	s.Model = model
 }
 
-// GetModel returns the AI model for this session.
+// GetModel returns the session's specific model, or empty if using global.
 func (s *Session) GetModel() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Model
+}
+
+// EnsureProcessorStarted starts the session processor if it hasn't been started yet.
+func (s *Session) EnsureProcessorStarted(startFunc func(sess *Session)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.processorStarted {
+		s.processorStarted = true
+		go startFunc(s)
+	}
 }
 
 // generateUUID generates a UUID v4 string using crypto/rand.

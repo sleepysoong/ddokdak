@@ -105,8 +105,6 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 	sess := h.sessionManager.CreateSession(thread.ID)
 	log.Printf("새 세션 생성: ThreadID=%s, SessionID=%s", thread.ID, sess.ID)
 
-	h.startSessionProcessor(s, sess)
-
 	h.enqueueMessage(s, m, sess)
 }
 
@@ -118,7 +116,6 @@ func (h *MessageHandler) handleThreadMessage(s *discordgo.Session, m *discordgo.
 	if !exists {
 		// 봇 재시작 등으로 세션이 메모리에 없다면 새로 생성하여 처리 이어나감
 		sess = h.sessionManager.CreateSession(threadID)
-		h.startSessionProcessor(s, sess)
 	}
 
 	sess.UpdateLastActive()
@@ -142,6 +139,10 @@ func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.Messa
 	}
 
 	if strings.TrimSpace(content) != "" {
+		sess.EnsureProcessorStarted(func(sessionObj *session.Session) {
+			h.startSessionProcessor(s, sessionObj)
+		})
+
 		sess.Enqueue(m.ID, content)
 	}
 }
