@@ -199,10 +199,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	conversationID := sess.GetConversationID()
 	response, newConversationID, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
 
-	// 간단한 토큰 어림계산 (한글 비중 고려)
-	inputTokens := int64(len([]rune(prompt)) / 2)
-	outputTokens := int64(len([]rune(response)) / 2)
-	h.usageTracker.RecordCall(modelName, inputTokens, outputTokens)
+	h.usageTracker.RecordCall(modelName)
 	if err != nil {
 		h.usageTracker.RecordError(modelName)
 		log.Printf("AI 응답 생성 실패: %v", err)

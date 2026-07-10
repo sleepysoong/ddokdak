@@ -11,9 +11,9 @@ import (
 func TestRecordCall(t *testing.T) {
 	tracker := NewTracker()
 
-	tracker.RecordCall("Claude Opus 4.6 (Thinking)", 10, 20)
-	tracker.RecordCall("Claude Opus 4.6 (Thinking)", 10, 20)
-	tracker.RecordCall("Gemini 3.1 Pro (High)", 10, 20)
+	tracker.RecordCall("Claude Opus 4.6 (Thinking)")
+	tracker.RecordCall("Claude Opus 4.6 (Thinking)")
+	tracker.RecordCall("Gemini 3.1 Pro (High)")
 
 	usages := tracker.GetUsages()
 	if len(usages) != 2 {
@@ -40,7 +40,7 @@ func TestRecordCall(t *testing.T) {
 func TestRecordError(t *testing.T) {
 	tracker := NewTracker()
 
-	tracker.RecordCall("Claude Opus 4.6 (Thinking)", 10, 20)
+	tracker.RecordCall("Claude Opus 4.6 (Thinking)")
 	tracker.RecordError("Claude Opus 4.6 (Thinking)")
 	tracker.RecordError("Claude Opus 4.6 (Thinking)")
 
@@ -82,13 +82,13 @@ func TestGetUsagesSortedByCallCount(t *testing.T) {
 
 	// 각기 다른 횟수로 호출
 	for i := 0; i < 5; i++ {
-		tracker.RecordCall("모델A", 0, 0)
+		tracker.RecordCall("모델A")
 	}
 	for i := 0; i < 10; i++ {
-		tracker.RecordCall("모델B", 0, 0)
+		tracker.RecordCall("모델B")
 	}
 	for i := 0; i < 3; i++ {
-		tracker.RecordCall("모델C", 0, 0)
+		tracker.RecordCall("모델C")
 	}
 
 	usages := tracker.GetUsages()
@@ -150,10 +150,10 @@ func TestFormatDashboardEmpty(t *testing.T) {
 func TestFormatDashboardWithData(t *testing.T) {
 	tracker := NewTracker()
 
-	tracker.RecordCall("Claude Opus 4.6 (Thinking)", 0, 0)
-	tracker.RecordCall("Claude Opus 4.6 (Thinking)", 0, 0)
+	tracker.RecordCall("Claude Opus 4.6 (Thinking)")
+	tracker.RecordCall("Claude Opus 4.6 (Thinking)")
 	tracker.RecordError("Claude Opus 4.6 (Thinking)")
-	tracker.RecordCall("Gemini 3.1 Pro (High)", 0, 0)
+	tracker.RecordCall("Gemini 3.1 Pro (High)")
 
 	output := tracker.FormatDashboard()
 
@@ -224,7 +224,7 @@ func TestConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < callsPerGoroutine; j++ {
-				tracker.RecordCall("동시성 테스트 모델", 0, 0)
+				tracker.RecordCall("동시성 테스트 모델")
 			}
 		}()
 	}
@@ -269,7 +269,7 @@ func TestConcurrentAccess(t *testing.T) {
 func TestConcurrentFormatDashboard(t *testing.T) {
 	tracker := NewTracker()
 
-	tracker.RecordCall("테스트 모델", 0, 0)
+	tracker.RecordCall("테스트 모델")
 
 	var wg sync.WaitGroup
 	wg.Add(50)
@@ -329,7 +329,7 @@ func TestLastUsedAtUpdated(t *testing.T) {
 	tracker := NewTracker()
 
 	before := time.Now()
-	tracker.RecordCall("테스트 모델", 0, 0)
+	tracker.RecordCall("테스트 모델")
 	after := time.Now()
 
 	usages := tracker.GetUsages()
