@@ -4,7 +4,11 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,6 +26,13 @@ const (
 	// maxThreadNameLength는 디스코드 쓰레드 이름의 최대 길이입니다.
 	maxThreadNameLength = 100
 
+	// queueCheckInterval은 큐 상태를 확인하는 주기입니다.
+	queueCheckInterval = 500 * time.Millisecond
+)
+
+var attachRegex = regexp.MustCompile(`<ATTACH:([^>]+)>`)
+
+const (
 	// typingInterval은 타이핑 인디케이터 갱신 간격입니다.
 	typingInterval = 5 * time.Second
 
@@ -247,11 +258,64 @@ func (h *MessageHandler) sendResponse(s *discordgo.Session, channelID string, re
 		response = "⚠️ AI로부터 빈 응답을 받았습니다."
 	}
 
+	matches := attachRegex.FindAllStringSubmatch(response, -1)
+	var attachments []*discordgo.File
+	var errMessages []string
+
+	for _, match := range matches {
+		if len(match) > 1 {
+			filePath := match[1]
+			f, err := os.Open(filePath)
+			if err != nil {
+				errMessages = append(errMessages, fmt.Sprintf("\n[파일 첨부 실패: %s]", filepath.Base(filePath)))
+				continue
+			}
+			attachments = append(attachments, &discordgo.File{
+				Name:        filepath.Base(filePath),
+				ContentType: "application/octet-stream",
+				Reader:      f,
+			})
+		}
+	}
+	defer func() {
+		for _, f := range attachments {
+			if closer, ok := f.Reader.(io.Closer); ok {
+				closer.Close()
+			}
+		}
+	}()
+
+	response = attachRegex.ReplaceAllString(response, "")
+	for _, em := range errMessages {
+		response += em
+	}
+	response = strings.TrimSpace(response)
+
 	messages := splitMessage(response, maxMessageLength)
-	for _, msg := range messages {
-		if _, err := s.ChannelMessageSend(channelID, msg); err != nil {
-			log.Printf("메시지 전송 실패: %v", err)
-			return
+	if len(messages) == 0 {
+		messages = []string{""}
+	}
+
+	for i, msg := range messages {
+		var currentAttachments []*discordgo.File
+		if i == len(messages)-1 {
+			currentAttachments = attachments
+		}
+
+		if len(currentAttachments) > 0 {
+			_, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+				Content: strings.TrimSpace(msg),
+				Files:   currentAttachments,
+			})
+			if err != nil {
+				log.Printf("첨부파일 포함 메시지 전송 실패: %v", err)
+			}
+		} else {
+			if strings.TrimSpace(msg) != "" {
+				if _, err := s.ChannelMessageSend(channelID, strings.TrimSpace(msg)); err != nil {
+					log.Printf("메시지 전송 실패: %v", err)
+				}
+			}
 		}
 	}
 }
