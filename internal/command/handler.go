@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sleepysoong/ddokdak/internal/agy"
 	"github.com/sleepysoong/ddokdak/internal/config"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
@@ -29,23 +30,25 @@ func NewHandler(channelStore store.ChannelStore, cfg *config.Config, sm *session
 	}
 }
 
-// HandleInteraction은 슬래시 커맨드 인터랙션을 처리합니다.
+// HandleInteraction은 커맨드 및 컴포넌트 인터랙션을 처리합니다.
 func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
-		return
-	}
-
-	data := i.ApplicationCommandData()
-
-	switch data.Name {
-	case "채널지정":
-		h.handleSetChannel(s, i)
-	case "채널해제":
-		h.handleUnsetChannel(s, i)
-	case "모델변경":
-		h.handleModelChange(s, i)
-	case "사용량":
-		h.handleUsage(s, i)
+	switch i.Type {
+	case discordgo.InteractionApplicationCommand:
+		data := i.ApplicationCommandData()
+		switch data.Name {
+		case "채널지정":
+			h.handleSetChannel(s, i)
+		case "채널해제":
+			h.handleUnsetChannel(s, i)
+		case "모델변경":
+			h.handleModelChange(s, i)
+		case "사용량":
+			h.handleUsage(s, i)
+		case "new":
+			h.handleNewSessionCommand(s, i)
+		}
+	case discordgo.InteractionMessageComponent:
+		h.handleComponent(s, i)
 	}
 }
 
@@ -155,6 +158,114 @@ func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCrea
 
 	if err := h.dashboard.StartDashboard(s, i.ChannelID); err != nil {
 		log.Printf("사용량 대시보드 시작 실패: %v", err)
+	}
+}
+
+// handleNewSessionCommand는 /new 커맨드를 처리합니다.
+func (h *Handler) handleNewSessionCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	sessions, err := agy.GetRecentSessions(25)
+	if err != nil {
+		log.Printf("최근 세션 조회 실패: %v", err)
+		h.respondError(s, i, "세션 목록을 불러오는 중 오류가 발생했습니다.")
+		return
+	}
+
+	if len(sessions) == 0 {
+		h.respond(s, i, "불러올 기존 대화 세션이 없습니다.")
+		return
+	}
+
+	var options []discordgo.SelectMenuOption
+	for _, sess := range sessions {
+		options = append(options, discordgo.SelectMenuOption{
+			Label:       sess.Title,
+			Value:       sess.ID,
+			Description: sess.ID[:8] + "...", // short UUID
+		})
+	}
+
+	menu := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "select_session",
+					Placeholder: "이어서 대화할 세션을 선택하세요",
+					Options:     options,
+				},
+			},
+		},
+	}
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content:    "기존 세션 중에서 고르고 시작할 수 있습니다. 선택하면 새 쓰레드가 생성되거나 현재 쓰레드의 세션이 교체됩니다.",
+			Components: menu,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("/new 커맨드 응답 실패: %v", err)
+	}
+}
+
+// handleComponent는 셀렉트 메뉴 등의 컴포넌트 인터랙션을 처리합니다.
+func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	data := i.MessageComponentData()
+	if data.CustomID == "select_session" {
+		if len(data.Values) == 0 {
+			return
+		}
+		selectedConvID := data.Values[0]
+
+		channel, err := s.State.Channel(i.ChannelID)
+		if err != nil {
+			channel, err = s.Channel(i.ChannelID)
+		}
+
+		if err == nil && channel.IsThread() {
+			// 현재 채널이 쓰레드라면 세션을 덮어씌움
+			sess, exists := h.sessionManager.GetSession(i.ChannelID)
+			if !exists {
+				sess = h.sessionManager.CreateSession(i.ChannelID)
+			}
+			sess.SetConversationID(selectedConvID)
+			h.sessionManager.Save()
+			h.respond(s, i, "✅ 현재 쓰레드의 대화 세션이 선택한 세션으로 교체되었습니다. 계속 대화하세요!")
+		} else {
+			// 일반 채널이라면 새 쓰레드 생성
+			if !h.channelStore.IsRegistered(i.GuildID, i.ChannelID) {
+				h.respondError(s, i, "이 채널은 AI 대화 채널로 지정되어 있지 않습니다.")
+				return
+			}
+
+			// 인터랙션 메시지에 쓰레드를 만들 수는 없으므로, 새 안내 메시지를 보내고 거기서 쓰레드를 만듦
+			msg, err := s.ChannelMessageSend(i.ChannelID, "🔗 불러온 세션으로 대화를 시작합니다...")
+			if err != nil {
+				h.respondError(s, i, "쓰레드 생성용 메시지 전송 실패.")
+				return
+			}
+
+			thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
+				Name:                "불러온 대화 세션",
+				AutoArchiveDuration: 1440,
+			})
+			if err != nil {
+				h.respondError(s, i, "쓰레드 생성 실패.")
+				return
+			}
+
+			sess := h.sessionManager.CreateSession(thread.ID)
+			sess.SetConversationID(selectedConvID)
+			h.sessionManager.Save()
+
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseUpdateMessage,
+				Data: &discordgo.InteractionResponseData{
+					Content:    fmt.Sprintf("✅ 세션이 불러와졌습니다! <#%s> 에서 대화를 이어나가세요.", thread.ID),
+					Components: []discordgo.MessageComponent{}, // 셀렉트 메뉴 숨김
+				},
+			})
+		}
 	}
 }
 
