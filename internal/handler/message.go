@@ -150,6 +150,12 @@ func (h *MessageHandler) enqueueMessage(s *discordgo.Session, m *discordgo.Messa
 // startSessionProcessor는 세션의 큐를 구독하여 디바운싱 처리 후 AI 응답을 트리거합니다.
 func (h *MessageHandler) startSessionProcessor(s *discordgo.Session, sess *session.Session) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("🔥 [Panic Recovered] startSessionProcessor: %v", r)
+			}
+		}()
+
 		timer := time.NewTimer(time.Hour)
 		timer.Stop()
 
@@ -218,6 +224,12 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 // showTyping은 타이핑 인디케이터를 표시합니다.
 func (h *MessageHandler) showTyping(ctx context.Context, s *discordgo.Session, channelID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔥 [Panic Recovered] showTyping: %v", r)
+		}
+	}()
+
 	ticker := time.NewTicker(typingInterval)
 	defer ticker.Stop()
 

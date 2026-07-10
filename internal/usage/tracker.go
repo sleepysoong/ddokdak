@@ -188,6 +188,12 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 
 // runAutoUpdate는 1분마다 대시보드 메시지를 자동으로 업데이트합니다.
 func (d *Dashboard) runAutoUpdate(s *discordgo.Session, channelID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔥 [Panic Recovered] runAutoUpdate: %v", r)
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
