@@ -25,3 +25,8 @@ vendor/
 # 기타
 .codegraph
 .omo/
+
+test_tokens*
+internal/session/data/
+data/
+

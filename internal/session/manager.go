@@ -1,18 +1,20 @@
 package session
 
 import (
-	"encoding/json"
+	"database/sql"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // SessionManager manages all active sessions, keyed by Discord thread ID.
 type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
-	dataPath string
+	db       *sql.DB
 }
 
 // sessionData is used for JSON serialization.
@@ -24,7 +26,7 @@ type sessionData struct {
 }
 
 // NewSessionManager creates and returns a new SessionManager.
-// It also loads any existing sessions from disk.
+// It also loads any existing sessions from the SQLite database.
 func NewSessionManager(dataDir string) *SessionManager {
 	if dataDir == "" {
 		dataDir = filepath.Join(".", "data")
@@ -33,69 +35,103 @@ func NewSessionManager(dataDir string) *SessionManager {
 		log.Printf("Failed to create data directory: %v", err)
 	}
 	
+	dbPath := filepath.Join(dataDir, "ddokdak.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS sessions (
+			thread_id TEXT PRIMARY KEY,
+			id TEXT,
+			conversation_id TEXT,
+			model TEXT
+		)
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create sessions table: %v", err)
+	}
+
 	m := &SessionManager{
 		sessions: make(map[string]*Session),
-		dataPath: filepath.Join(dataDir, "sessions.json"),
+		db:       db,
 	}
 	m.load()
 	return m
 }
 
-// load reads sessions from the JSON file.
+// load reads sessions from the SQLite database.
 func (m *SessionManager) load() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	data, err := os.ReadFile(m.dataPath)
+	rows, err := m.db.Query("SELECT thread_id, id, conversation_id, model FROM sessions")
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("Failed to read sessions file: %v", err)
+		log.Printf("Failed to read sessions from db: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var threadID, id, conversationID, model string
+		if err := rows.Scan(&threadID, &id, &conversationID, &model); err != nil {
+			log.Printf("Failed to scan session row: %v", err)
+			continue
 		}
-		return
-	}
 
-	var stored map[string]sessionData
-	if err := json.Unmarshal(data, &stored); err != nil {
-		log.Printf("Failed to unmarshal sessions: %v", err)
-		return
-	}
-
-	for threadID, sd := range stored {
 		s := NewSession(threadID)
-		s.ID = sd.ID
-		s.ConversationID = sd.ConversationID
-		s.Model = sd.Model
+		s.ID = id
+		s.ConversationID = conversationID
+		s.Model = model
 		m.sessions[threadID] = s
+		count++
 	}
-	log.Printf("Loaded %d sessions from disk", len(stored))
+	log.Printf("Loaded %d sessions from disk", count)
 }
 
-// Save writes all current sessions to the JSON file.
+// Save writes all current sessions to the SQLite database.
 func (m *SessionManager) Save() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	stored := make(map[string]sessionData)
-	for threadID, s := range m.sessions {
-		// Acquire session lock briefly to read its data
-		s.mu.Lock()
-		stored[threadID] = sessionData{
-			ID:             s.ID,
-			ThreadID:       s.ThreadID,
-			ConversationID: s.ConversationID,
-			Model:          s.Model,
-		}
-		s.mu.Unlock()
-	}
-
-	data, err := json.MarshalIndent(stored, "", "  ")
+	tx, err := m.db.Begin()
 	if err != nil {
-		log.Printf("Failed to marshal sessions: %v", err)
+		log.Printf("Failed to begin transaction for save: %v", err)
 		return
 	}
+	defer tx.Rollback()
 
-	if err := os.WriteFile(m.dataPath, data, 0644); err != nil {
-		log.Printf("Failed to write sessions file: %v", err)
+	// Optionally, we could only update changed sessions, but since we're replacing Save(),
+	// we'll just upsert them all or clear and insert. UPSERT is better.
+	stmt, err := tx.Prepare(`
+		INSERT INTO sessions (thread_id, id, conversation_id, model) 
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(thread_id) DO UPDATE SET 
+			id=excluded.id,
+			conversation_id=excluded.conversation_id,
+			model=excluded.model
+	`)
+	if err != nil {
+		log.Printf("Failed to prepare statement: %v", err)
+		return
+	}
+	defer stmt.Close()
+
+	for threadID, s := range m.sessions {
+		s.mu.Lock()
+		id, convID, model := s.ID, s.ConversationID, s.Model
+		s.mu.Unlock()
+
+		_, err := stmt.Exec(threadID, id, convID, model)
+		if err != nil {
+			log.Printf("Failed to save session for thread %s: %v", threadID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Printf("Failed to commit session save transaction: %v", err)
 	}
 }
 
@@ -129,6 +165,9 @@ func (m *SessionManager) RemoveSession(threadID string) {
 	delete(m.sessions, threadID)
 	m.mu.Unlock()
 
-	m.Save()
+	_, err := m.db.Exec("DELETE FROM sessions WHERE thread_id = ?", threadID)
+	if err != nil {
+		log.Printf("Failed to delete session %s from db: %v", threadID, err)
+	}
 }
 

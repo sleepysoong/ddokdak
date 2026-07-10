@@ -49,8 +49,19 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("로그 디렉토리 생성 실패: %w", err)
 	}
 
-	channelStore := store.NewInMemoryChannelStore()
-	sessionManager := session.NewSessionManager(filepath.Join(".", "data"))
+	dataDir := filepath.Join(".", "data")
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("데이터 디렉토리 생성 실패: %w", err)
+	}
+
+	// 의존성 초기화
+	dbPath := filepath.Join(dataDir, "ddokdak.db")
+	channelStore, err := store.NewSQLiteChannelStore(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("채널 스토어 초기화 실패: %w", err)
+	}
+
+	sessionManager := session.NewSessionManager(dataDir)
 	agyClient := agy.NewClient(cfg.AgyTimeout.String(), logDir)
 
 	dlDir := filepath.Join(".", "downloads")
