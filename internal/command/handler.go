@@ -238,6 +238,17 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 				return
 			}
 
+			// 세션 제목 찾기
+			threadName := "불러온 대화 세션"
+			if sessions, err := agy.GetRecentSessions(25); err == nil {
+				for _, sessInfo := range sessions {
+					if sessInfo.ID == selectedConvID {
+						threadName = sessInfo.Title
+						break
+					}
+				}
+			}
+
 			// 인터랙션 메시지에 쓰레드를 만들 수는 없으므로, 새 안내 메시지를 보내고 거기서 쓰레드를 만듦
 			msg, err := s.ChannelMessageSend(i.ChannelID, "🔗 불러온 세션으로 대화를 시작합니다...")
 			if err != nil {
@@ -246,7 +257,7 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 			}
 
 			thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
-				Name:                "불러온 대화 세션",
+				Name:                threadName,
 				AutoArchiveDuration: 1440,
 			})
 			if err != nil {
