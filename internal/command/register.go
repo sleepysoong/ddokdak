@@ -64,6 +64,10 @@ var commands = []*discordgo.ApplicationCommand{
 		Description: "AI 모델별 사용량 대시보드를 표시합니다. 1분마다 자동으로 업데이트됩니다.",
 	},
 	{
+		Name:        "로그",
+		Description: "현재 쓰레드의 AI 로그 파일을 다운로드합니다.",
+	},
+	{
 		Name:        "new",
 		Description: "기존 AI 대화 세션 목록을 불러와 이어서 대화할 수 있습니다.",
 	},

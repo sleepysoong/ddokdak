@@ -44,6 +44,8 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 			h.handleModelChange(s, i)
 		case "사용량":
 			h.handleUsage(s, i)
+		case "로그":
+			h.handleLogCommand(s, i)
 		case "new":
 			h.handleNewSessionCommand(s, i)
 		}
@@ -158,6 +160,44 @@ func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCrea
 
 	if err := h.dashboard.StartDashboard(s, i.ChannelID); err != nil {
 		log.Printf("사용량 대시보드 시작 실패: %v", err)
+	}
+}
+
+// handleLogCommand는 /로그 커맨드를 처리합니다.
+func (h *Handler) handleLogCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	channel, err := s.State.Channel(i.ChannelID)
+	if err != nil {
+		channel, err = s.Channel(i.ChannelID)
+	}
+
+	if err != nil || !channel.IsThread() {
+		h.respondError(s, i, "이 명령어는 AI 대화 쓰레드 내에서만 사용할 수 있습니다.")
+		return
+	}
+
+	logFilePath := filepath.Join(".", "logs", i.ChannelID+".log")
+	file, err := os.Open(logFilePath)
+	if err != nil {
+		h.respondError(s, i, "현재 쓰레드의 로그 파일을 찾을 수 없거나 열 수 없습니다.")
+		return
+	}
+	defer file.Close()
+
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "📄 현재 대화 세션의 로그 파일입니다.",
+			Files: []*discordgo.File{
+				{
+					Name:        i.ChannelID + ".log",
+					ContentType: "text/plain",
+					Reader:      file,
+				},
+			},
+			Flags: discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("/로그 커맨드 응답 실패: %v", err)
 	}
 }
 
