@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -325,28 +326,37 @@ func stripQuotes(s string) string {
 }
 
 func formatToolCallInline(exec agy.ToolExecution) string {
+	// 우선순위가 높은 공통 인자 Key 목록
+	priorityKeys := []string{
+		"CommandLine", "command", "cmd",
+		"AbsolutePath", "TargetFile", "Target", "path", "file", "filename",
+		"Query", "query", "q",
+		"Url", "url", "uri",
+		"name", "Recipient",
+	}
+
 	var argVal interface{}
-	switch exec.ToolName {
-	case "run_command":
-		argVal = exec.Args["CommandLine"]
-	case "view_file":
-		argVal = exec.Args["AbsolutePath"]
-	case "grep_search":
-		argVal = exec.Args["Query"]
-	case "replace_file_content", "multi_replace_file_content", "write_to_file":
-		argVal = exec.Args["TargetFile"]
-	case "read_url_content":
-		argVal = exec.Args["Url"]
-	case "search_web":
-		argVal = exec.Args["query"]
-	case "ask_permission":
-		argVal = exec.Args["Target"]
-	case "command_status":
-		argVal = exec.Args["CommandId"]
-	case "define_subagent":
-		argVal = exec.Args["name"]
-	case "send_message":
-		argVal = exec.Args["Recipient"]
+	// 1. 우선순위 목록에서 먼저 매칭되는 Key를 찾음
+	for _, key := range priorityKeys {
+		if val, exists := exec.Args[key]; exists {
+			argVal = val
+			break
+		}
+	}
+
+	// 2. 만약 매칭되는 우선순위 Key가 없으면, 모든 인자를 key=value 형태로 결합 (시스템 인자 제외)
+	if argVal == nil && len(exec.Args) > 0 {
+		var parts []string
+		for k, v := range exec.Args {
+			if k == "toolAction" || k == "toolSummary" || k == "IsSkillFile" || k == "IsMock" {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		}
+		if len(parts) > 0 {
+			sort.Strings(parts)
+			argVal = strings.Join(parts, ", ")
+		}
 	}
 
 	if argVal != nil {
