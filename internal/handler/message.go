@@ -231,6 +231,71 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	} else {
 		h.sendResponse(s, threadID, fmt.Sprintf("• **`%s`**", modelName))
 	}
+
+	// 도구 호출 및 결과 파싱하여 리포트 전송
+	var report string
+	if newConversationID != "" {
+		executions, err := agy.ParseToolExecutions(newConversationID)
+		if err == nil {
+			report = formatToolReport(executions)
+		} else {
+			log.Printf("도구 실행 내역 파싱 실패: %v", err)
+			report = "🛠️ **실행된 도구 및 결과 리포트**\n* 도구 실행 내역을 파싱하는 도중 에러가 발생했습니다."
+		}
+	} else {
+		report = "🛠️ **실행된 도구 및 결과 리포트**\n* 세션 대화 ID가 없어 도구 실행 내역을 불러올 수 없습니다."
+	}
+	h.sendResponse(s, threadID, report)
+}
+
+func formatToolReport(executions []agy.ToolExecution) string {
+	var sb strings.Builder
+	sb.WriteString("🛠️ **실행된 도구 및 결과 리포트**\n")
+
+	if len(executions) == 0 {
+		sb.WriteString("*   실행된 도구가 없습니다. (단순 대화 처리)\n")
+		return sb.String()
+	}
+
+	for i, exec := range executions {
+		sb.WriteString(fmt.Sprintf("\n**%d. `%s`**\n", i+1, exec.ToolName))
+
+		// Args formatting
+		if len(exec.Args) > 0 {
+			sb.WriteString("*   **매개변수**:\n")
+			for k, v := range exec.Args {
+				sb.WriteString(fmt.Sprintf("    *   `%s`: `%v`\n", k, v))
+			}
+		}
+
+		// Output formatting
+		statusStr := "성공"
+		if !exec.Success {
+			statusStr = "실패"
+		}
+
+		output := strings.TrimSpace(exec.Output)
+		if output == "" {
+			output = "(내용 없음)"
+		} else {
+			// Truncate output if too long
+			const maxOutputLen = 300
+			if len(output) > maxOutputLen {
+				output = output[:maxOutputLen] + " ... (생략)"
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("*   **결과 메시지** (`%s`):\n", statusStr))
+		sb.WriteString("    ```text\n")
+		// Indent output lines
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			sb.WriteString("    " + line + "\n")
+		}
+		sb.WriteString("    ```\n")
+	}
+
+	return sb.String()
 }
 
 // showTyping은 타이핑 인디케이터를 표시합니다.
