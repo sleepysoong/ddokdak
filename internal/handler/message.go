@@ -232,70 +232,75 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		usedModel = actualModel
 	}
 
-	// 도구 호출 및 결과 파싱하여 리포트 전송
+	// 도구 호출 및 결과 파싱
 	var toolsUsed []string
 	if newConversationID != "" {
 		executions, err := agy.ParseToolExecutions(newConversationID)
 		if err == nil {
-			// 중복 제거 및 순서 유지
-			seen := make(map[string]bool)
 			for _, exec := range executions {
-				name := exec.ToolName
-				if !seen[name] {
-					seen[name] = true
-					toolsUsed = append(toolsUsed, name)
-				}
+				toolsUsed = append(toolsUsed, formatToolCallInline(exec))
 			}
 		} else {
 			log.Printf("도구 실행 내역 파싱 실패: %v", err)
 		}
 	}
 
-	// 도구 정보 마크다운 생성
-	toolsStr := "*(사용 안 함)*"
+	// 답변 생성 정보 통합 요약 메시지 구성
+	var finalMessage strings.Builder
 	if len(toolsUsed) > 0 {
-		var formattedTools []string
 		for _, t := range toolsUsed {
-			formattedTools = append(formattedTools, fmt.Sprintf("`%s`", t))
+			finalMessage.WriteString(fmt.Sprintf("○ %s\n", t))
 		}
-		toolsStr = strings.Join(formattedTools, ", ")
+		finalMessage.WriteString("\n")
 	}
 
-	// 답변 생성 정보 통합 요약 메시지 구성
-	var summary strings.Builder
-	summary.WriteString("🤖 **답변 생성 정보**\n")
-	summary.WriteString("━━━━━━━━━━━━━━━━━━\n")
-	summary.WriteString(fmt.Sprintf("• **모델** ｜ **`%s`**\n", usedModel))
-	summary.WriteString(fmt.Sprintf("• **도구** ｜ %s", toolsStr))
+	finalMessage.WriteString(response)
+	finalMessage.WriteString("\n\n")
+	finalMessage.WriteString(fmt.Sprintf("● **`%s`**", usedModel))
 
-	h.sendResponse(s, threadID, summary.String())
+	h.sendResponse(s, threadID, finalMessage.String())
 }
 
-func formatToolReport(executions []agy.ToolExecution) string {
-	var sb strings.Builder
-	sb.WriteString("🛠️ **사용된 도구**\n")
+func stripQuotes(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
 
-	if len(executions) == 0 {
-		sb.WriteString("• (사용된 도구 없음)\n")
-		return sb.String()
+func formatToolCallInline(exec agy.ToolExecution) string {
+	var argVal interface{}
+	switch exec.ToolName {
+	case "run_command":
+		argVal = exec.Args["CommandLine"]
+	case "view_file":
+		argVal = exec.Args["AbsolutePath"]
+	case "grep_search":
+		argVal = exec.Args["Query"]
+	case "replace_file_content", "multi_replace_file_content", "write_to_file":
+		argVal = exec.Args["TargetFile"]
+	case "read_url_content":
+		argVal = exec.Args["Url"]
+	case "search_web":
+		argVal = exec.Args["query"]
+	case "ask_permission":
+		argVal = exec.Args["Target"]
+	case "command_status":
+		argVal = exec.Args["CommandId"]
+	case "define_subagent":
+		argVal = exec.Args["name"]
+	case "send_message":
+		argVal = exec.Args["Recipient"]
 	}
 
-	// 중복 제거 및 순서 유지를 위한 슬라이스
-	seen := make(map[string]bool)
-	var toolNames []string
-	for _, exec := range executions {
-		name := exec.ToolName
-		if !seen[name] {
-			seen[name] = true
-			toolNames = append(toolNames, name)
+	if argVal != nil {
+		valStr := stripQuotes(fmt.Sprintf("%v", argVal))
+		if len(valStr) > 60 {
+			valStr = valStr[:57] + "..."
 		}
+		return fmt.Sprintf("`%s(%s)`", exec.ToolName, valStr)
 	}
-
-	for _, name := range toolNames {
-		sb.WriteString(fmt.Sprintf("• `%s`\n", name))
-	}
-
-	return sb.String()
+	return fmt.Sprintf("`%s`", exec.ToolName)
 }
 
 // showTyping은 타이핑 인디케이터를 표시합니다.
