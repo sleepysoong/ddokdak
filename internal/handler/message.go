@@ -226,26 +226,49 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	h.sendResponse(s, threadID, response)
 
+	// 실제 사용한 모델 확정
+	usedModel := modelName
 	if actualModel != "" {
-		h.sendResponse(s, threadID, fmt.Sprintf("• **`%s`**", actualModel))
-	} else {
-		h.sendResponse(s, threadID, fmt.Sprintf("• **`%s`**", modelName))
+		usedModel = actualModel
 	}
 
 	// 도구 호출 및 결과 파싱하여 리포트 전송
-	var report string
+	var toolsUsed []string
 	if newConversationID != "" {
 		executions, err := agy.ParseToolExecutions(newConversationID)
 		if err == nil {
-			report = formatToolReport(executions)
+			// 중복 제거 및 순서 유지
+			seen := make(map[string]bool)
+			for _, exec := range executions {
+				name := exec.ToolName
+				if !seen[name] {
+					seen[name] = true
+					toolsUsed = append(toolsUsed, name)
+				}
+			}
 		} else {
 			log.Printf("도구 실행 내역 파싱 실패: %v", err)
-			report = "🛠️ **실행된 도구 및 결과 리포트**\n* 도구 실행 내역을 파싱하는 도중 에러가 발생했습니다."
 		}
-	} else {
-		report = "🛠️ **실행된 도구 및 결과 리포트**\n* 세션 대화 ID가 없어 도구 실행 내역을 불러올 수 없습니다."
 	}
-	h.sendResponse(s, threadID, report)
+
+	// 도구 정보 마크다운 생성
+	toolsStr := "*(사용 안 함)*"
+	if len(toolsUsed) > 0 {
+		var formattedTools []string
+		for _, t := range toolsUsed {
+			formattedTools = append(formattedTools, fmt.Sprintf("`%s`", t))
+		}
+		toolsStr = strings.Join(formattedTools, ", ")
+	}
+
+	// 답변 생성 정보 통합 요약 메시지 구성
+	var summary strings.Builder
+	summary.WriteString("🤖 **답변 생성 정보**\n")
+	summary.WriteString("━━━━━━━━━━━━━━━━━━\n")
+	summary.WriteString(fmt.Sprintf("• **모델** ｜ **`%s`**\n", usedModel))
+	summary.WriteString(fmt.Sprintf("• **도구** ｜ %s", toolsStr))
+
+	h.sendResponse(s, threadID, summary.String())
 }
 
 func formatToolReport(executions []agy.ToolExecution) string {
