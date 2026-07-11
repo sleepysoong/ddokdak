@@ -227,9 +227,9 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	h.sendResponse(s, threadID, response)
 
 	if actualModel != "" {
-		h.sendResponse(s, threadID, fmt.Sprintf("• **%s**", actualModel))
+		h.sendResponse(s, threadID, fmt.Sprintf("• **`%s`**", actualModel))
 	} else {
-		h.sendResponse(s, threadID, fmt.Sprintf("• **%s**", modelName))
+		h.sendResponse(s, threadID, fmt.Sprintf("• **`%s`**", modelName))
 	}
 }
 
