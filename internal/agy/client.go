@@ -40,7 +40,6 @@ func (c *Client) buildCommand(ctx context.Context, prompt, model, threadID, conv
 
 	args := []string{
 		"--model", model,
-		"--print-timeout", c.timeout,
 		"--log-file", logFile,
 		"--dangerously-skip-permissions",
 	}

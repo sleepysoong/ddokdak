@@ -28,7 +28,6 @@ func TestBuildCommand_NewConversation(t *testing.T) {
 
 	expected := []string{
 		"--model", "gemini-2.5-pro",
-		"--print-timeout", "120",
 		"--log-file", "/var/log/ddokdak/thread-abc-123.log",
 		"--dangerously-skip-permissions",
 		"-p", "Hello, world!",
