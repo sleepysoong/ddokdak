@@ -171,6 +171,7 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 	if oldMsgID, exists := d.activeDashboards[channelID]; exists {
 		_ = s.ChannelMessageDelete(channelID, oldMsgID)
 		delete(d.activeDashboards, channelID)
+		_ = d.sessionManager.DeleteActiveDashboard(channelID)
 	}
 
 	d.mu.Unlock()
@@ -184,6 +185,11 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 	d.mu.Lock()
 	d.activeDashboards[channelID] = msg.ID
 	d.mu.Unlock()
+
+	// DB에 대시보드 메시지 ID 저장
+	if err := d.sessionManager.SaveActiveDashboard(channelID, msg.ID); err != nil {
+		log.Printf("usage: DB에 대시보드 메시지 ID 저장 실패: %v", err)
+	}
 
 	// 고루틴으로 1분마다 대시보드 자동 업데이트
 	go d.runAutoUpdate(s, channelID)
@@ -236,7 +242,27 @@ func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
 		d.mu.Lock()
 		delete(d.activeDashboards, channelID)
 		d.mu.Unlock()
+		_ = d.sessionManager.DeleteActiveDashboard(channelID)
 	}
+}
+
+// RestoreDashboards는 데이터베이스에 저장된 활성 대시보드 목록을 복구하고 자동 업데이트 루프를 가동합니다.
+func (d *Dashboard) RestoreDashboards(s *discordgo.Session) error {
+	dbDashboards, err := d.sessionManager.GetActiveDashboards()
+	if err != nil {
+		return fmt.Errorf("대시보드 목록 조회 실패: %w", err)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for channelID, messageID := range dbDashboards {
+		d.activeDashboards[channelID] = messageID
+		go d.runAutoUpdate(s, channelID)
+	}
+
+	log.Printf("📊 %d개의 사용량 대시보드를 DB로부터 성공적으로 복구하여 자동 업데이트 루프를 시작했습니다.", len(dbDashboards))
+	return nil
 }
 
 // FormatGlobalDashboard는 전체 세션의 모델별 토큰 사용량과 예상 비용을 집계하여 메시지로 포맷합니다.

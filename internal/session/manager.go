@@ -67,6 +67,16 @@ func NewSessionManager(dataDir string) *SessionManager {
 		log.Fatalf("Failed to create token_usages table: %v", err)
 	}
 
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS active_dashboards (
+			channel_id TEXT PRIMARY KEY,
+			message_id TEXT
+		)
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create active_dashboards table: %v", err)
+	}
+
 	m := &SessionManager{
 		sessions: make(map[string]*Session),
 		db:       db,
@@ -263,5 +273,49 @@ func (m *SessionManager) RemoveSession(threadID string) {
 	if err != nil {
 		log.Printf("Failed to delete session %s from db: %v", threadID, err)
 	}
+}
+
+// SaveActiveDashboard saves or updates an active dashboard message ID for a channel.
+func (m *SessionManager) SaveActiveDashboard(channelID, messageID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		INSERT INTO active_dashboards (channel_id, message_id)
+		VALUES (?, ?)
+		ON CONFLICT(channel_id) DO UPDATE SET message_id = excluded.message_id
+	`, channelID, messageID)
+	return err
+}
+
+// DeleteActiveDashboard deletes an active dashboard message.
+func (m *SessionManager) DeleteActiveDashboard(channelID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec("DELETE FROM active_dashboards WHERE channel_id = ?", channelID)
+	return err
+}
+
+// GetActiveDashboards returns all active dashboards stored in the database.
+func (m *SessionManager) GetActiveDashboards() (map[string]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query("SELECT channel_id, message_id FROM active_dashboards")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dashboards := make(map[string]string)
+	for rows.Next() {
+		var chanID, msgID string
+		if err := rows.Scan(&chanID, &msgID); err != nil {
+			return nil, err
+		}
+		dashboards[chanID] = msgID
+	}
+	return dashboards, nil
 }
 

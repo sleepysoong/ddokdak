@@ -102,6 +102,11 @@ func (b *Bot) Start() error {
 		return fmt.Errorf("디스코드 연결 실패: %w", err)
 	}
 
+	// 저장된 활성 대시보드를 DB에서 로드하여 복구
+	if err := b.dashboard.RestoreDashboards(b.session); err != nil {
+		log.Printf("경고: 저장된 사용량 대시보드 복구 실패: %v", err)
+	}
+
 	registeredCommands, err := command.RegisterCommands(b.session, "")
 	if err != nil {
 		return fmt.Errorf("슬래시 커맨드 등록 실패: %w", err)
