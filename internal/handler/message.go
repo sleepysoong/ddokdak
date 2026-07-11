@@ -250,49 +250,26 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 func formatToolReport(executions []agy.ToolExecution) string {
 	var sb strings.Builder
-	sb.WriteString("🛠️ **실행된 도구 및 결과 리포트**\n")
+	sb.WriteString("🛠️ **사용된 도구**\n")
 
 	if len(executions) == 0 {
-		sb.WriteString("*   실행된 도구가 없습니다. (단순 대화 처리)\n")
+		sb.WriteString("• (사용된 도구 없음)\n")
 		return sb.String()
 	}
 
-	for i, exec := range executions {
-		sb.WriteString(fmt.Sprintf("\n**%d. `%s`**\n", i+1, exec.ToolName))
-
-		// Args formatting
-		if len(exec.Args) > 0 {
-			sb.WriteString("*   **매개변수**:\n")
-			for k, v := range exec.Args {
-				sb.WriteString(fmt.Sprintf("    *   `%s`: `%v`\n", k, v))
-			}
+	// 중복 제거 및 순서 유지를 위한 슬라이스
+	seen := make(map[string]bool)
+	var toolNames []string
+	for _, exec := range executions {
+		name := exec.ToolName
+		if !seen[name] {
+			seen[name] = true
+			toolNames = append(toolNames, name)
 		}
+	}
 
-		// Output formatting
-		statusStr := "성공"
-		if !exec.Success {
-			statusStr = "실패"
-		}
-
-		output := strings.TrimSpace(exec.Output)
-		if output == "" {
-			output = "(내용 없음)"
-		} else {
-			// Truncate output if too long
-			const maxOutputLen = 300
-			if len(output) > maxOutputLen {
-				output = output[:maxOutputLen] + " ... (생략)"
-			}
-		}
-
-		sb.WriteString(fmt.Sprintf("*   **결과 메시지** (`%s`):\n", statusStr))
-		sb.WriteString("    ```text\n")
-		// Indent output lines
-		lines := strings.Split(output, "\n")
-		for _, line := range lines {
-			sb.WriteString("    " + line + "\n")
-		}
-		sb.WriteString("    ```\n")
+	for _, name := range toolNames {
+		sb.WriteString(fmt.Sprintf("• `%s`\n", name))
 	}
 
 	return sb.String()
