@@ -3,6 +3,8 @@ package command
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sleepysoong/ddokdak/internal/agy"
