@@ -3,8 +3,10 @@
 package usage
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -237,7 +239,7 @@ func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
 	}
 }
 
-// FormatGlobalDashboard는 전체 세션의 모델별 토큰 사용량을 집계하여 메시지로 포맷합니다.
+// FormatGlobalDashboard는 전체 세션의 모델별 토큰 사용량과 예상 비용을 집계하여 메시지로 포맷합니다.
 func (d *Dashboard) FormatGlobalDashboard() string {
 	var sb strings.Builder
 
@@ -249,18 +251,167 @@ func (d *Dashboard) FormatGlobalDashboard() string {
 		log.Printf("Failed to get global token usages: %v", err)
 	}
 
+	rate := getExchangeRate()
+	var totalCostUSD float64
+
 	if len(usages) == 0 {
 		sb.WriteString("📭 아직 사용 기록이 없습니다.\n\n")
 	} else {
 		for _, u := range usages {
 			sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
 			sb.WriteString(fmt.Sprintf("├ 호출: %d회\n", u.CallCount))
-			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %d\n", u.InputTokens))
-			sb.WriteString(fmt.Sprintf("└ 출력 토큰: %d\n\n", u.OutputTokens))
+			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %s\n", formatComma(u.InputTokens)))
+			sb.WriteString(fmt.Sprintf("├ 출력 토큰: %s\n", formatComma(u.OutputTokens)))
+
+			pricing, ok := matchPricing(u.ModelName)
+			if ok {
+				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
+				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
+				costUSD := inputCost + outputCost
+				totalCostUSD += costUSD
+				costKRW := costUSD * rate
+
+				sb.WriteString(fmt.Sprintf("└ 예상 비용: $%s (약 %s원)\n\n", formatCostUSD(costUSD), formatComma(int64(costKRW+0.5))))
+			} else {
+				sb.WriteString("└ 예상 비용: 가격 정보 없음\n\n")
+			}
 		}
 	}
 
+	totalCostKRW := totalCostUSD * rate
+	sb.WriteString(fmt.Sprintf("💵 **총 누적 비용**: $%s (약 %s원)\n", formatCostUSD(totalCostUSD), formatComma(int64(totalCostKRW+0.5))))
+	sb.WriteString(fmt.Sprintf("💱 실시간 환율: 1 USD = %s KRW\n", fmt.Sprintf("%.2f", rate)))
 	sb.WriteString(fmt.Sprintf("🔄 마지막 업데이트: %s", time.Now().In(kst).Format("15:04:05")))
 
 	return sb.String()
+}
+
+// FormatSessionDashboard는 특정 세션의 모델별 토큰 사용량과 예상 비용을 메시지로 포맷합니다.
+func (d *Dashboard) FormatSessionDashboard(usages []session.ModelTokenUsage, threadID string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("📊 **현재 세션 사용량 리포트** (쓰레드 ID: `%s`)\n", threadID))
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	rate := getExchangeRate()
+	var totalCostUSD float64
+
+	if len(usages) == 0 {
+		sb.WriteString("📭 이 세션에서 아직 사용한 토큰 기록이 없습니다.\n\n")
+	} else {
+		for _, u := range usages {
+			sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
+			sb.WriteString(fmt.Sprintf("├ 호출: %d회\n", u.CallCount))
+			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %s\n", formatComma(u.InputTokens)))
+			sb.WriteString(fmt.Sprintf("├ 출력 토큰: %s\n", formatComma(u.OutputTokens)))
+
+			pricing, ok := matchPricing(u.ModelName)
+			if ok {
+				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
+				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
+				costUSD := inputCost + outputCost
+				totalCostUSD += costUSD
+				costKRW := costUSD * rate
+
+				sb.WriteString(fmt.Sprintf("└ 예상 비용: $%s (약 %s원)\n\n", formatCostUSD(costUSD), formatComma(int64(costKRW+0.5))))
+			} else {
+				sb.WriteString("└ 예상 비용: 가격 정보 없음\n\n")
+			}
+		}
+	}
+
+	totalCostKRW := totalCostUSD * rate
+	sb.WriteString(fmt.Sprintf("💵 **세션 누적 비용**: $%s (약 %s원)\n", formatCostUSD(totalCostUSD), formatComma(int64(totalCostKRW+0.5))))
+	sb.WriteString(fmt.Sprintf("💱 실시간 환율: 1 USD = %s KRW\n", fmt.Sprintf("%.2f", rate)))
+
+	return sb.String()
+}
+
+type ModelPricing struct {
+	InputPriceUSD  float64 // per 1M tokens
+	OutputPriceUSD float64 // per 1M tokens
+}
+
+var pricingMap = map[string]ModelPricing{
+	"Gemini 3.5 Flash": {
+		InputPriceUSD:  1.5,
+		OutputPriceUSD: 9.0,
+	},
+	"Gemini 3.1 Pro": {
+		InputPriceUSD:  2.0,
+		OutputPriceUSD: 12.0,
+	},
+	"Claude Sonnet 4.6": {
+		InputPriceUSD:  3.0,
+		OutputPriceUSD: 15.0,
+	},
+	"Claude Opus 4.6 (Thinking)": {
+		InputPriceUSD:  5.0,
+		OutputPriceUSD: 25.0,
+	},
+}
+
+func matchPricing(modelName string) (ModelPricing, bool) {
+	if strings.Contains(modelName, "Gemini 3.5 Flash") {
+		return pricingMap["Gemini 3.5 Flash"], true
+	}
+	if strings.Contains(modelName, "Gemini 3.1 Pro") {
+		return pricingMap["Gemini 3.1 Pro"], true
+	}
+	if strings.Contains(modelName, "Claude Sonnet") {
+		return pricingMap["Claude Sonnet 4.6"], true
+	}
+	if strings.Contains(modelName, "Claude Opus") {
+		return pricingMap["Claude Opus 4.6 (Thinking)"], true
+	}
+	return ModelPricing{}, false
+}
+
+func getExchangeRate() float64 {
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("https://open.er-api.com/v6/latest/USD")
+	if err != nil {
+		return 1500.0 // Fallback
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Rates map[string]float64 `json:"rates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 1500.0 // Fallback
+	}
+
+	rate, ok := result.Rates["KRW"]
+	if !ok || rate <= 0 {
+		return 1500.0 // Fallback
+	}
+	return rate
+}
+
+func formatComma(n int64) string {
+	in := fmt.Sprintf("%d", n)
+	out := make([]byte, len(in)+(len(in)-1)/3)
+	if len(in) == 0 {
+		return ""
+	}
+	for i, j, k := len(in)-1, len(out)-1, 0; i >= 0; i, j = i-1, j-1 {
+		out[j] = in[i]
+		k++
+		if k%3 == 0 && i > 0 {
+			j--
+			out[j] = ','
+		}
+	}
+	return string(out)
+}
+
+func formatCostUSD(cost float64) string {
+	if cost == 0 {
+		return "0.00"
+	}
+	if cost < 0.01 {
+		return fmt.Sprintf("%.4f", cost)
+	}
+	return fmt.Sprintf("%.2f", cost)
 }

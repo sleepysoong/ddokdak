@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sleepysoong/ddokdak/internal/agy"
@@ -168,22 +167,8 @@ func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCrea
 			return
 		}
 
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("📊 **현재 세션 사용량 리포트** (쓰레드 ID: `%s`)\n", i.ChannelID))
-		sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
-
-		if len(usages) == 0 {
-			sb.WriteString("📭 이 세션에서 아직 사용한 토큰 기록이 없습니다.\n\n")
-		} else {
-			for _, u := range usages {
-				sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
-				sb.WriteString(fmt.Sprintf("├ 호출: %d회\n", u.CallCount))
-				sb.WriteString(fmt.Sprintf("├ 입력 토큰: %d\n", u.InputTokens))
-				sb.WriteString(fmt.Sprintf("└ 출력 토큰: %d\n\n", u.OutputTokens))
-			}
-		}
-
-		h.respond(s, i, sb.String())
+		content := h.dashboard.FormatSessionDashboard(usages, i.ChannelID)
+		h.respond(s, i, content)
 		return
 	}
 
