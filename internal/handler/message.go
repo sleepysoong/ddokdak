@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -224,8 +225,6 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		h.sessionManager.Save()
 	}
 
-	h.sendResponse(s, threadID, response)
-
 	// 실제 사용한 모델 확정
 	usedModel := modelName
 	if actualModel != "" {
@@ -245,7 +244,23 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		}
 	}
 
-	// 답변 생성 정보 통합 요약 메시지 구성
+	// 실시간 텔레메트리(컨텍스트 비율 및 사용 토큰 수) 파싱
+	var pct int
+	if newConversationID != "" {
+		telemetry, err := agy.ParseTelemetry(newConversationID)
+		if err == nil {
+			pct = telemetry.Pct
+			// sqlite에 세션별 모델 토큰 사용량 기록
+			h.sessionManager.RecordTokenUsage(threadID, usedModel, telemetry.InputTokens, telemetry.OutputTokens)
+			
+			// 백그라운드에서 쓰레드 이름 업데이트 (컨텍스트 퍼센트 반영)
+			go h.updateThreadNameWithPercentage(s, threadID, pct)
+		} else {
+			log.Printf("텔레메트리 파싱 실패: %v", err)
+		}
+	}
+
+	// 답변 생성 정보 통합 요약 메시지 구성 (사용자 요청 템플릿과 100% 일치)
 	var finalMessage strings.Builder
 	if len(toolsUsed) > 0 {
 		for _, t := range toolsUsed {
@@ -256,9 +271,50 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	finalMessage.WriteString(response)
 	finalMessage.WriteString("\n\n")
-	finalMessage.WriteString(fmt.Sprintf("● **`%s`**", usedModel))
+
+	// 모델명 뒤에 (pct%) 추가
+	if pct > 0 {
+		finalMessage.WriteString(fmt.Sprintf("● **`%s`** `(%d%%)`", usedModel, pct))
+	} else {
+		finalMessage.WriteString(fmt.Sprintf("● **`%s`**", usedModel))
+	}
 
 	h.sendResponse(s, threadID, finalMessage.String())
+}
+
+// updateThreadNameWithPercentage는 쓰레드 이름 뒤에 컨텍스트 사용량 (n%)을 덧붙이거나 업데이트합니다.
+func (h *MessageHandler) updateThreadNameWithPercentage(s *discordgo.Session, threadID string, pct int) {
+	// 런타임 패닉 방지
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔥 [Panic Recovered] updateThreadNameWithPercentage: %v", r)
+		}
+	}()
+
+	channel, err := s.State.Channel(threadID)
+	if err != nil {
+		channel, err = s.Channel(threadID)
+		if err != nil {
+			log.Printf("쓰레드 채널 정보 조회 실패 %s: %v", threadID, err)
+			return
+		}
+	}
+
+	// 기존에 붙어있는 " (n%)" 패턴 제거 regex (무한 증식 방지)
+	re := regexp.MustCompile(`\s*\(\d+%\)$`)
+	cleanName := re.ReplaceAllString(channel.Name, "")
+	newName := fmt.Sprintf("%s (%d%%)", cleanName, pct)
+
+	if newName != channel.Name {
+		_, err = s.ChannelEdit(threadID, &discordgo.ChannelEdit{
+			Name: newName,
+		})
+		if err != nil {
+			log.Printf("쓰레드 이름 수정 실패 %s: %v", threadID, err)
+		} else {
+			log.Printf("쓰레드 이름 업데이트 완료: %s", newName)
+		}
+	}
 }
 
 func stripQuotes(s string) string {

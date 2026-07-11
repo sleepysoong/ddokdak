@@ -111,3 +111,31 @@ func parseToolExecutionsFromFile(filePath string) ([]ToolExecution, error) {
 
 	return executions, nil
 }
+
+type Telemetry struct {
+	Model        string `json:"model"`
+	Pct          int    `json:"pct"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+}
+
+// ParseTelemetry reads and decodes the telemetry file for a given conversation ID.
+func ParseTelemetry(conversationID string) (*Telemetry, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("user home dir: %w", err)
+	}
+
+	filePath := filepath.Join(home, ".gemini", "antigravity-cli", fmt.Sprintf("telemetry_%s.json", conversationID))
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("open telemetry: %w", err)
+	}
+	defer file.Close()
+
+	var t Telemetry
+	if err := json.NewDecoder(file).Decode(&t); err != nil {
+		return nil, fmt.Errorf("decode telemetry: %w", err)
+	}
+	return &t, nil
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sleepysoong/ddokdak/internal/session"
 )
 
 // kst는 한국 표준 시간대입니다.
@@ -146,14 +147,16 @@ type Dashboard struct {
 	stopChan         chan struct{}
 	mu               sync.Mutex
 	activeDashboards map[string]string // channelID -> messageID
+	sessionManager   *session.SessionManager
 }
 
 // NewDashboard는 새로운 Dashboard를 생성합니다.
-func NewDashboard(tracker *Tracker) *Dashboard {
+func NewDashboard(tracker *Tracker, sessionManager *session.SessionManager) *Dashboard {
 	return &Dashboard{
 		tracker:          tracker,
 		stopChan:         make(chan struct{}),
 		activeDashboards: make(map[string]string),
+		sessionManager:   sessionManager,
 	}
 }
 
@@ -170,7 +173,7 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 
 	d.mu.Unlock()
 
-	content := d.tracker.FormatDashboard()
+	content := d.FormatGlobalDashboard()
 	msg, err := s.ChannelMessageSend(channelID, content)
 	if err != nil {
 		return fmt.Errorf("usage: 대시보드 메시지 전송 실패: %w", err)
@@ -222,7 +225,7 @@ func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
 		return
 	}
 
-	content := d.tracker.FormatDashboard()
+	content := d.FormatGlobalDashboard()
 	_, err := s.ChannelMessageEdit(channelID, msgID, content)
 	if err != nil {
 		log.Printf("usage: 대시보드 업데이트 실패 (채널: %s): %v", channelID, err)
@@ -232,4 +235,32 @@ func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
 		delete(d.activeDashboards, channelID)
 		d.mu.Unlock()
 	}
+}
+
+// FormatGlobalDashboard는 전체 세션의 모델별 토큰 사용량을 집계하여 메시지로 포맷합니다.
+func (d *Dashboard) FormatGlobalDashboard() string {
+	var sb strings.Builder
+
+	sb.WriteString("📊 **AI 모델 전체 사용량 대시보드**\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	usages, err := d.sessionManager.GetGlobalTokenUsages()
+	if err != nil {
+		log.Printf("Failed to get global token usages: %v", err)
+	}
+
+	if len(usages) == 0 {
+		sb.WriteString("📭 아직 사용 기록이 없습니다.\n\n")
+	} else {
+		for _, u := range usages {
+			sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
+			sb.WriteString(fmt.Sprintf("├ 호출: %d회\n", u.CallCount))
+			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %d\n", u.InputTokens))
+			sb.WriteString(fmt.Sprintf("└ 출력 토큰: %d\n\n", u.OutputTokens))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("🔄 마지막 업데이트: %s", time.Now().In(kst).Format("15:04:05")))
+
+	return sb.String()
 }

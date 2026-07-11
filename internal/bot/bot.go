@@ -71,7 +71,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	}
 
 	usageTracker := usage.NewTracker()
-	dashboard := usage.NewDashboard(usageTracker)
+	dashboard := usage.NewDashboard(usageTracker, sessionManager)
 
 	commandHandler := command.NewHandler(channelStore, cfg, sessionManager, dashboard)
 	messageHandler := handler.NewMessageHandler(channelStore, sessionManager, agyClient, cfg, dl, usageTracker)

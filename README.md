@@ -109,6 +109,33 @@ export DISCORD_TOKEN="your-bot-token-here"
 | `AGY_TIMEOUT` | ❌ | `5m` | agy 명령 타임아웃 |
 | `LOG_LEVEL` | ❌ | `info` | 로그 레벨 (debug, info, warn, error) |
 
+## ⚙️ Antigravity CLI 실시간 컨텍스트 및 토큰 추적 설정
+
+똑닥 봇은 백그라운드에서 실행되는 `agy` CLI의 실시간 컨텍스트(used percentage) 및 인풋/아웃풋 토큰을 안전하게 가로채기 위해 `settings.json` 파이프(TUI Status Line) 기능을 활용합니다. 
+
+원활한 토큰 추적을 위해 **다음 세팅 작업을 반드시 수행해 주세요**:
+
+1. 저장소의 `scripts/statusline.sh` 파일을 `~/.gemini/antigravity-cli/statusline.sh` 경로로 복사하고 실행 권한을 부여합니다:
+   ```bash
+   mkdir -p ~/.gemini/antigravity-cli
+   cp scripts/statusline.sh ~/.gemini/antigravity-cli/statusline.sh
+   chmod +x ~/.gemini/antigravity-cli/statusline.sh
+   ```
+
+2. `~/.gemini/antigravity-cli/settings.json` 파일을 열어 `statusLine` 설정을 다음과 같이 추가하거나 수정합니다:
+   ```json
+   {
+     "statusLine": {
+       "type": "command",
+       "command": "/root/.gemini/antigravity-cli/statusline.sh",
+       "enabled": true
+     }
+   }
+   ```
+   *(참고: `/root` 부분은 실제 계정의 홈 디렉토리 절대경로로 맞춰야 합니다.)*
+
+이렇게 세팅하면 봇이 AI 응답을 제공할 때 사용된 툴 목록, 사용 토큰 수, 컨텍스트 비율(%)을 완벽히 모니터링하여 디스코드에 리포트하고, 쓰레드 이름 뒤에 자동으로 컨텍스트 크기 `(n%)`를 실시간 반영합니다.
+
 ## 🧪 테스트
 
 ```bash

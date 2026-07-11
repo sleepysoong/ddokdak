@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sleepysoong/ddokdak/internal/session"
 )
 
 // TestRecordCall은 모델 호출 기록이 올바르게 카운트되는지 검증합니다.
@@ -308,7 +310,8 @@ func TestNewTrackerInitialization(t *testing.T) {
 // TestNewDashboardInitialization은 NewDashboard의 초기 상태를 검증합니다.
 func TestNewDashboardInitialization(t *testing.T) {
 	tracker := NewTracker()
-	dashboard := NewDashboard(tracker)
+	sm := session.NewSessionManager(t.TempDir())
+	dashboard := NewDashboard(tracker, sm)
 
 	if dashboard.tracker != tracker {
 		t.Error("대시보드의 tracker가 주입된 tracker와 동일해야 합니다")

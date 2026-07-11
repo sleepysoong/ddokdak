@@ -13,7 +13,7 @@ func TestNewHandler(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
 	cfg := &config.Config{}
 	sm := session.NewSessionManager(t.TempDir())
-	dashboard := usage.NewDashboard(usage.NewTracker())
+	dashboard := usage.NewDashboard(usage.NewTracker(), sm)
 	handler := NewHandler(channelStore, cfg, sm, dashboard)
 
 	if handler == nil {
@@ -29,7 +29,7 @@ func TestHandlerHasChannelStore(t *testing.T) {
 	channelStore := store.NewInMemoryChannelStore()
 	cfg := &config.Config{}
 	sm := session.NewSessionManager(t.TempDir())
-	dashboard := usage.NewDashboard(usage.NewTracker())
+	dashboard := usage.NewDashboard(usage.NewTracker(), sm)
 	handler := NewHandler(channelStore, cfg, sm, dashboard)
 
 	if handler.channelStore != channelStore {

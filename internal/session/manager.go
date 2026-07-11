@@ -53,12 +53,106 @@ func NewSessionManager(dataDir string) *SessionManager {
 		log.Fatalf("Failed to create sessions table: %v", err)
 	}
 
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS token_usages (
+			thread_id TEXT,
+			model TEXT,
+			calls INTEGER DEFAULT 0,
+			input_tokens INTEGER DEFAULT 0,
+			output_tokens INTEGER DEFAULT 0,
+			PRIMARY KEY(thread_id, model)
+		)
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create token_usages table: %v", err)
+	}
+
 	m := &SessionManager{
 		sessions: make(map[string]*Session),
 		db:       db,
 	}
 	m.load()
 	return m
+}
+
+// ModelTokenUsage represents token usage statistics for a specific model.
+type ModelTokenUsage struct {
+	ModelName    string
+	CallCount    int64
+	InputTokens  int64
+	OutputTokens int64
+}
+
+// RecordTokenUsage records a model call and its token usage for a session.
+func (m *SessionManager) RecordTokenUsage(threadID string, model string, inputTokens, outputTokens int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		INSERT INTO token_usages (thread_id, model, calls, input_tokens, output_tokens)
+		VALUES (?, ?, 1, ?, ?)
+		ON CONFLICT(thread_id, model) DO UPDATE SET
+			calls = calls + 1,
+			input_tokens = input_tokens + excluded.input_tokens,
+			output_tokens = output_tokens + excluded.output_tokens
+	`, threadID, model, inputTokens, outputTokens)
+	if err != nil {
+		log.Printf("Failed to record token usage for thread %s: %v", threadID, err)
+	}
+}
+
+// GetSessionTokenUsages returns the model token usage statistics for a specific session.
+func (m *SessionManager) GetSessionTokenUsages(threadID string) ([]ModelTokenUsage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT model, calls, input_tokens, output_tokens 
+		FROM token_usages 
+		WHERE thread_id = ?
+		ORDER BY calls DESC
+	`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var usages []ModelTokenUsage
+	for rows.Next() {
+		var u ModelTokenUsage
+		if err := rows.Scan(&u.ModelName, &u.CallCount, &u.InputTokens, &u.OutputTokens); err != nil {
+			return nil, err
+		}
+		usages = append(usages, u)
+	}
+	return usages, nil
+}
+
+// GetGlobalTokenUsages returns the summed model token usage statistics across all sessions.
+func (m *SessionManager) GetGlobalTokenUsages() ([]ModelTokenUsage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT model, SUM(calls), SUM(input_tokens), SUM(output_tokens) 
+		FROM token_usages 
+		GROUP BY model
+		ORDER BY SUM(calls) DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var usages []ModelTokenUsage
+	for rows.Next() {
+		var u ModelTokenUsage
+		if err := rows.Scan(&u.ModelName, &u.CallCount, &u.InputTokens, &u.OutputTokens); err != nil {
+			return nil, err
+		}
+		usages = append(usages, u)
+	}
+	return usages, nil
 }
 
 // load reads sessions from the SQLite database.

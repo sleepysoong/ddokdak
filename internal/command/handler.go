@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sleepysoong/ddokdak/internal/agy"
@@ -158,7 +159,36 @@ func (h *Handler) handleModelChange(s *discordgo.Session, i *discordgo.Interacti
 
 // handleUsage는 /사용량 커맨드를 처리합니다.
 func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	h.respond(s, i, "📊 사용량 대시보드를 생성합니다...")
+	// 현재 채널(쓰레드)에 활성 세션이 있는지 확인
+	_, exists := h.sessionManager.GetSession(i.ChannelID)
+	if exists {
+		usages, err := h.sessionManager.GetSessionTokenUsages(i.ChannelID)
+		if err != nil {
+			h.respondError(s, i, fmt.Sprintf("세션 사용량 조회 실패: %v", err))
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📊 **현재 세션 사용량 리포트** (쓰레드 ID: `%s`)\n", i.ChannelID))
+		sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+		if len(usages) == 0 {
+			sb.WriteString("📭 이 세션에서 아직 사용한 토큰 기록이 없습니다.\n\n")
+		} else {
+			for _, u := range usages {
+				sb.WriteString(fmt.Sprintf("🤖 **%s**\n", u.ModelName))
+				sb.WriteString(fmt.Sprintf("├ 호출: %d회\n", u.CallCount))
+				sb.WriteString(fmt.Sprintf("├ 입력 토큰: %d\n", u.InputTokens))
+				sb.WriteString(fmt.Sprintf("└ 출력 토큰: %d\n\n", u.OutputTokens))
+			}
+		}
+
+		h.respond(s, i, sb.String())
+		return
+	}
+
+	// 쓰레드 밖인 경우 - 기존처럼 1분 주기 전체 대시보드 출력
+	h.respond(s, i, "📊 전체 사용량 대시보드를 생성합니다...")
 
 	if err := h.dashboard.StartDashboard(s, i.ChannelID); err != nil {
 		log.Printf("사용량 대시보드 시작 실패: %v", err)
