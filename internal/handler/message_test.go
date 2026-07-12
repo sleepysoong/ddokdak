@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sleepysoong/ddokdak/internal/session"
+	"github.com/sleepysoong/ddokdak/internal/store"
 )
 
 func TestTruncateString(t *testing.T) {
@@ -153,4 +155,108 @@ func TestGetThreadDetails(t *testing.T) {
 		t.Errorf("expected parentID to be empty, got %q", parentID)
 	}
 }
+
+func TestHandleMessage_FilterUnregisteredThreads(t *testing.T) {
+	s, err := discordgo.New("Bot TOKEN")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	s.State.User = &discordgo.User{ID: "bot-id"}
+
+	guild := &discordgo.Guild{ID: "guild-123"}
+	s.State.GuildAdd(guild)
+
+	// Unregistered thread
+	threadChan := &discordgo.Channel{
+		ID:       "thread-777",
+		GuildID:  "guild-123",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "parent-999",
+	}
+	s.State.ChannelAdd(threadChan)
+
+	channelStore := store.NewInMemoryChannelStore()
+	sessionManager := session.NewSessionManager(t.TempDir())
+
+	h := &MessageHandler{
+		channelStore:   channelStore,
+		sessionManager: sessionManager,
+	}
+
+	m := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "msg-001",
+			ChannelID: "thread-777",
+			GuildID:   "guild-123",
+			Content:   "Hello AI",
+			Author: &discordgo.User{
+				ID:  "user-555",
+				Bot: false,
+			},
+		},
+	}
+
+	// Should return early without panicking or creating a session
+	h.HandleMessage(s, m)
+
+	_, exists := sessionManager.GetSession("thread-777")
+	if exists {
+		t.Error("expected no session to be created for unregistered thread")
+	}
+}
+
+func TestHandleMessage_AllowRegisteredThreads(t *testing.T) {
+	s, err := discordgo.New("Bot TOKEN")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	s.State.User = &discordgo.User{ID: "bot-id"}
+
+	guild := &discordgo.Guild{ID: "guild-123"}
+	s.State.GuildAdd(guild)
+
+	// Registered thread
+	threadChan := &discordgo.Channel{
+		ID:       "thread-888",
+		GuildID:  "guild-123",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "parent-111",
+	}
+	s.State.ChannelAdd(threadChan)
+
+	channelStore := store.NewInMemoryChannelStore()
+	channelStore.AddChannel("guild-123", "parent-111") // Register parent channel
+
+	sessionManager := session.NewSessionManager(t.TempDir())
+
+	h := &MessageHandler{
+		channelStore:   channelStore,
+		sessionManager: sessionManager,
+	}
+
+	m := &discordgo.MessageCreate{
+		Message: &discordgo.Message{
+			ID:        "msg-002",
+			ChannelID: "thread-888",
+			GuildID:   "guild-123",
+			Content:   "Hello AI",
+			Author: &discordgo.User{
+				ID:  "user-555",
+				Bot: false,
+			},
+		},
+	}
+
+	h.HandleMessage(s, m)
+
+	// Verify that the session was created and contains the message
+	sess, exists := sessionManager.GetSession("thread-888")
+	if !exists {
+		t.Fatal("expected session to be created for registered thread")
+	}
+	if sess.GetPendingCount() != 1 {
+		t.Errorf("expected 1 pending message in session queue, got %d", sess.GetPendingCount())
+	}
+}
+
 
