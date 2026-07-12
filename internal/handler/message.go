@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -114,6 +115,44 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 	sess := h.sessionManager.CreateSession(thread.ID)
 	log.Printf("새 세션 생성: ThreadID=%s, SessionID=%s", thread.ID, sess.ID)
 
+	// 인터랙티브 컴포넌트를 가진 환영 메시지 구성
+	welcomeMsg := &discordgo.MessageSend{
+		Content: "🤖 **AI 대화 세션이 시작되었습니다!**\n이 쓰레드 내의 모든 대화는 하나의 세션으로 묶여 맥락이 유지됩니다.",
+		Components: []discordgo.MessageComponent{
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    "select_model",
+						Placeholder: "🤖 이 세션의 AI 모델 변경...",
+						Options: []discordgo.SelectMenuOption{
+							{Label: "Claude Opus 4.6 (Thinking)", Value: "Claude Opus 4.6 (Thinking)"},
+							{Label: "Gemini 3.1 Pro (High)", Value: "Gemini 3.1 Pro (High)"},
+							{Label: "Gemini 3.5 Flash (High)", Value: "Gemini 3.5 Flash (High)"},
+							{Label: "Gemini 3.5 Flash (Medium)", Value: "Gemini 3.5 Flash (Medium)"},
+						},
+					},
+				},
+			},
+			discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.Button{
+						Label:    "📊 현재 세션 사용량",
+						Style:    discordgo.SecondaryButton,
+						CustomID: "btn_usage",
+					},
+					discordgo.Button{
+						Label:    "🔒 세션 종료 및 아카이브",
+						Style:    discordgo.DangerButton,
+						CustomID: "btn_end_session",
+					},
+				},
+			},
+		},
+	}
+	if _, err := s.ChannelMessageSendComplex(thread.ID, welcomeMsg); err != nil {
+		log.Printf("환영 메시지 전송 실패: %v", err)
+	}
+
 	h.enqueueMessage(s, m, sess)
 }
 
@@ -205,20 +244,98 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	go h.showTyping(ctx, s, threadID)
 
+	// 1. 디스코드 생각 중(Thinking) 메시지 전송
+	thinkingMsg, err := s.ChannelMessageSend(threadID, "⏳ **AI가 생각하는 중입니다...**")
+	var thinkingMsgID string
+	if err == nil {
+		thinkingMsgID = thinkingMsg.ID
+	} else {
+		log.Printf("생각 중 메시지 전송 실패: %v", err)
+	}
+
 	// 세션 모델 확인 (없으면 글로벌 모델 사용)
 	modelName := sess.GetModel()
 	if modelName == "" {
 		modelName = h.config.GetGlobalModel()
 	}
 
+	// 2. 백그라운드 실시간 진행 상황 업데이트 고루틴 가동
+	updateCtx, updateCancel := context.WithCancel(context.Background())
+	defer updateCancel()
+
+	if thinkingMsgID != "" {
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+
+			var lastContent string
+			for {
+				select {
+				case <-updateCtx.Done():
+					return
+				case <-ticker.C:
+					convID := sess.GetConversationID()
+					if convID == "" {
+						logFile := filepath.Join(h.agyClient.GetLogDir(), threadID+".log")
+						convID = agy.ExtractConversationID(logFile)
+					}
+
+					if convID == "" {
+						continue
+					}
+
+					executions, err := agy.ParseToolExecutions(convID)
+					var toolsUsed []string
+					if err == nil {
+						for _, exec := range executions {
+							toolsUsed = append(toolsUsed, formatToolCallInline(exec))
+						}
+					}
+
+					var pct int
+					telemetry, err := agy.ParseTelemetry(convID)
+					if err == nil {
+						pct = telemetry.Pct
+					}
+
+					var sb strings.Builder
+					sb.WriteString("⏳ **AI가 생각하는 중입니다...**\n")
+					if len(toolsUsed) > 0 {
+						sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+						for _, t := range toolsUsed {
+							sb.WriteString(fmt.Sprintf("○ %s\n", t))
+						}
+					}
+					if pct > 0 {
+						sb.WriteString(fmt.Sprintf("\n*(현재 컨텍스트 사용량: %d%%)*", pct))
+					}
+
+					content := sb.String()
+					if content != lastContent {
+						_, _ = s.ChannelMessageEdit(threadID, thinkingMsgID, content)
+						lastContent = content
+					}
+				}
+			}
+		}()
+	}
+
 	conversationID := sess.GetConversationID()
 	response, newConversationID, actualModel, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
+
+	// 실시간 업데이트 루프 종료
+	updateCancel()
 
 	h.usageTracker.RecordCall(actualModel)
 	if err != nil {
 		h.usageTracker.RecordError(actualModel)
 		log.Printf("AI 응답 생성 실패: %v", err)
-		h.sendErrorMessage(s, threadID, err)
+		errorMsg := fmt.Sprintf("❌ AI 응답 생성 중 오류가 발생했습니다: %v", err)
+		if thinkingMsgID != "" {
+			_, _ = s.ChannelMessageEdit(threadID, thinkingMsgID, errorMsg)
+		} else {
+			_, _ = s.ChannelMessageSend(threadID, errorMsg)
+		}
 		return
 	}
 
@@ -284,7 +401,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		finalMessage.WriteString(fmt.Sprintf("● **`%s`**", usedModel))
 	}
 
-	h.sendResponse(s, threadID, finalMessage.String())
+	h.sendResponseWithEdit(s, threadID, finalMessage.String(), thinkingMsgID)
 }
 
 
@@ -369,26 +486,32 @@ func (h *MessageHandler) showTyping(ctx context.Context, s *discordgo.Session, c
 	}
 }
 
-// sendResponse는 응답을 채널에 전송합니다. 메시지가 길 경우 분할하여 전송합니다.
-func (h *MessageHandler) sendResponse(s *discordgo.Session, channelID string, response string) {
+// sendResponseWithEdit는 응답을 채널에 전송하며, 첫 번째 메시지는 기존 메시지를 수정하여 덮어씁니다.
+func (h *MessageHandler) sendResponseWithEdit(s *discordgo.Session, channelID string, response string, editMsgID string) {
 	if response == "" {
 		response = "⚠️ AI로부터 빈 응답을 받았습니다."
 	}
 
 	messages := splitMessage(response, maxMessageLength)
-	for _, msg := range messages {
-		if _, err := s.ChannelMessageSend(channelID, msg); err != nil {
-			log.Printf("메시지 전송 실패: %v", err)
-			return
+	if len(messages) > 0 {
+		// 첫 번째 메시지는 생각 중 메시지를 덮어씁니다.
+		if editMsgID != "" {
+			_, err := s.ChannelMessageEdit(channelID, editMsgID, messages[0])
+			if err != nil {
+				log.Printf("메시지 수정 실패, 새 메시지 전송 시도: %v", err)
+				_, _ = s.ChannelMessageSend(channelID, messages[0])
+			}
+		} else {
+			_, _ = s.ChannelMessageSend(channelID, messages[0])
 		}
-	}
-}
 
-// sendErrorMessage는 에러 메시지를 채널에 전송합니다.
-func (h *MessageHandler) sendErrorMessage(s *discordgo.Session, channelID string, err error) {
-	errorMsg := fmt.Sprintf("❌ AI 응답 생성 중 오류가 발생했습니다: %v", err)
-	if _, sendErr := s.ChannelMessageSend(channelID, errorMsg); sendErr != nil {
-		log.Printf("에러 메시지 전송 실패: %v", sendErr)
+		// 분할된 후속 메시지들을 전송합니다.
+		for i := 1; i < len(messages); i++ {
+			if _, err := s.ChannelMessageSend(channelID, messages[i]); err != nil {
+				log.Printf("메시지 전송 실패: %v", err)
+				return
+			}
+		}
 	}
 }
 

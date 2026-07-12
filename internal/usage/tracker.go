@@ -176,8 +176,8 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 
 	d.mu.Unlock()
 
-	content := d.FormatGlobalDashboard()
-	msg, err := s.ChannelMessageSend(channelID, content)
+	embed := d.FormatGlobalDashboardEmbed()
+	msg, err := s.ChannelMessageSendEmbed(channelID, embed)
 	if err != nil {
 		return fmt.Errorf("usage: 대시보드 메시지 전송 실패: %w", err)
 	}
@@ -233,8 +233,8 @@ func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
 		return
 	}
 
-	content := d.FormatGlobalDashboard()
-	_, err := s.ChannelMessageEdit(channelID, msgID, content)
+	embed := d.FormatGlobalDashboardEmbed()
+	_, err := s.ChannelMessageEditEmbed(channelID, msgID, embed)
 	if err != nil {
 		log.Printf("usage: 대시보드 업데이트 실패 (채널: %s): %v", channelID, err)
 
@@ -351,6 +351,123 @@ func (d *Dashboard) FormatSessionDashboard(usages []session.ModelTokenUsage, thr
 	sb.WriteString(fmt.Sprintf("💱 실시간 환율: 1 USD = %s KRW\n", fmt.Sprintf("%.2f", rate)))
 
 	return sb.String()
+}
+
+// FormatGlobalDashboardEmbed는 전체 세션의 사용량을 디스코드 임베드로 포맷합니다.
+func (d *Dashboard) FormatGlobalDashboardEmbed() *discordgo.MessageEmbed {
+	usages, err := d.sessionManager.GetGlobalTokenUsages()
+	if err != nil {
+		log.Printf("Failed to get global token usages: %v", err)
+	}
+
+	rate := getExchangeRate()
+	var totalCostUSD float64
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "📊 AI 모델 전체 사용량 대시보드",
+		Color:       0x3498db, // Sleek blue
+		Description: "각 모델별 누적 호출 횟수, 토큰 사용량 및 예상 비용입니다.",
+		Fields:      []*discordgo.MessageEmbedField{},
+		Timestamp:   time.Now().In(kst).Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("실시간 환율: 1 USD = %s KRW | 업데이트: %s", fmt.Sprintf("%.2f", rate), time.Now().In(kst).Format("15:04:05")),
+		},
+	}
+
+	if len(usages) == 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "📭 기록 없음",
+			Value:  "아직 사용 기록이 없습니다.",
+			Inline: false,
+		})
+	} else {
+		for _, u := range usages {
+			pricing, ok := matchPricing(u.ModelName)
+			costText := "가격 정보 없음"
+			if ok {
+				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
+				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
+				costUSD := inputCost + outputCost
+				totalCostUSD += costUSD
+				costKRW := costUSD * rate
+				costText = fmt.Sprintf("$%s (약 %s원)", formatCostUSD(costUSD), formatComma(int64(costKRW+0.5)))
+			}
+
+			val := fmt.Sprintf("├ **호출**: %d회\n├ **입력**: %s 토큰\n├ **출력**: %s 토큰\n└ **비용**: %s",
+				u.CallCount, formatComma(u.InputTokens), formatComma(u.OutputTokens), costText)
+
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   fmt.Sprintf("🤖 %s", u.ModelName),
+				Value:  val,
+				Inline: false,
+			})
+		}
+	}
+
+	totalCostKRW := totalCostUSD * rate
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "💵 총 누적 비용",
+		Value:  fmt.Sprintf("**$%s** (약 **%s원**)", formatCostUSD(totalCostUSD), formatComma(int64(totalCostKRW+0.5))),
+		Inline: false,
+	})
+
+	return embed
+}
+
+// FormatSessionDashboardEmbed는 특정 세션의 사용량을 디스코드 임베드로 포맷합니다.
+func (d *Dashboard) FormatSessionDashboardEmbed(usages []session.ModelTokenUsage, threadID string) *discordgo.MessageEmbed {
+	rate := getExchangeRate()
+	var totalCostUSD float64
+
+	embed := &discordgo.MessageEmbed{
+		Title:       "📊 현재 세션 사용량 리프트",
+		Color:       0x2ecc71, // Elegant green
+		Description: fmt.Sprintf("쓰레드 ID: `%s` 의 세션별 AI 모델 사용량 통계입니다.", threadID),
+		Fields:      []*discordgo.MessageEmbedField{},
+		Timestamp:   time.Now().In(kst).Format(time.RFC3339),
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: fmt.Sprintf("실시간 환율: 1 USD = %s KRW", fmt.Sprintf("%.2f", rate)),
+		},
+	}
+
+	if len(usages) == 0 {
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   "📭 기록 없음",
+			Value:  "이 세션에서 아직 사용한 토큰 기록이 없습니다.",
+			Inline: false,
+		})
+	} else {
+		for _, u := range usages {
+			pricing, ok := matchPricing(u.ModelName)
+			costText := "가격 정보 없음"
+			if ok {
+				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
+				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
+				costUSD := inputCost + outputCost
+				totalCostUSD += costUSD
+				costKRW := costUSD * rate
+				costText = fmt.Sprintf("$%s (약 %s원)", formatCostUSD(costUSD), formatComma(int64(costKRW+0.5)))
+			}
+
+			val := fmt.Sprintf("├ **호출**: %d회\n├ **입력**: %s 토큰\n├ **출력**: %s 토큰\n└ **비용**: %s",
+				u.CallCount, formatComma(u.InputTokens), formatComma(u.OutputTokens), costText)
+
+			embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+				Name:   fmt.Sprintf("🤖 %s", u.ModelName),
+				Value:  val,
+				Inline: false,
+			})
+		}
+	}
+
+	totalCostKRW := totalCostUSD * rate
+	embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+		Name:   "💵 세션 누적 비용",
+		Value:  fmt.Sprintf("**$%s** (약 **%s원**)", formatCostUSD(totalCostUSD), formatComma(int64(totalCostKRW+0.5))),
+		Inline: false,
+	})
+
+	return embed
 }
 
 type ModelPricing struct {

@@ -32,6 +32,11 @@ func NewClient(timeout, logDir string) *Client {
 	}
 }
 
+// GetLogDir returns the log directory of the agy client.
+func (c *Client) GetLogDir() string {
+	return c.logDir
+}
+
 // buildCommand constructs the exec.Cmd for the agy CLI invocation.
 // threadID is used to derive the log file name.
 // If conversationID is non-empty, the --conversation flag is appended.
@@ -104,7 +109,7 @@ func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, thr
 		newConversationID = conversationID
 	} else {
 		// Attempt to extract the newly created conversation ID from the log file.
-		newConversationID = extractConversationID(logFile)
+		newConversationID = ExtractConversationID(logFile)
 		if newConversationID == "" {
 			// Fallback (might not work for continuing, but better than nothing)
 			newConversationID = threadID
@@ -119,8 +124,8 @@ func (c *Client) Execute(ctx context.Context, prompt, model, conversationID, thr
 	return response, newConversationID, actualModel, nil
 }
 
-// extractConversationID attempts to find the conversation UUID in the log file.
-func extractConversationID(logFile string) string {
+// ExtractConversationID attempts to find the conversation UUID in the log file.
+func ExtractConversationID(logFile string) string {
 	content, err := os.ReadFile(logFile)
 	if err != nil {
 		return ""

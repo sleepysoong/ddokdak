@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/sleepysoong/ddokdak/internal/agy"
@@ -50,6 +51,8 @@ func (h *Handler) HandleInteraction(s *discordgo.Session, i *discordgo.Interacti
 			h.handleLogCommand(s, i)
 		case "new":
 			h.handleNewSessionCommand(s, i)
+		case "세션종료":
+			h.handleEndSession(s, i)
 		}
 	case discordgo.InteractionMessageComponent:
 		h.handleComponent(s, i)
@@ -167,8 +170,8 @@ func (h *Handler) handleUsage(s *discordgo.Session, i *discordgo.InteractionCrea
 			return
 		}
 
-		content := h.dashboard.FormatSessionDashboard(usages, i.ChannelID)
-		h.respond(s, i, content)
+		embed := h.dashboard.FormatSessionDashboardEmbed(usages, i.ChannelID)
+		h.respondEmbed(s, i, embed)
 		return
 	}
 
@@ -334,7 +337,60 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 				},
 			})
 		}
+	} else if data.CustomID == "select_model" {
+		if len(data.Values) == 0 {
+			return
+		}
+		modelName := data.Values[0]
+		sess, exists := h.sessionManager.GetSession(i.ChannelID)
+		if !exists {
+			h.respondError(s, i, "이 쓰레드에 활성화된 세션이 없습니다.")
+			return
+		}
+		sess.SetModel(modelName)
+		h.sessionManager.Save()
+		h.respond(s, i, fmt.Sprintf("🤖 이 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
+	} else if data.CustomID == "btn_usage" {
+		usages, err := h.sessionManager.GetSessionTokenUsages(i.ChannelID)
+		if err != nil {
+			h.respondError(s, i, fmt.Sprintf("세션 사용량 조회 실패: %v", err))
+			return
+		}
+		embed := h.dashboard.FormatSessionDashboardEmbed(usages, i.ChannelID)
+		h.respondEmbed(s, i, embed)
+	} else if data.CustomID == "btn_end_session" {
+		h.handleEndSession(s, i)
 	}
+}
+
+// handleEndSession은 /세션종료 커맨드 혹은 종료 버튼 클릭을 처리합니다.
+func (h *Handler) handleEndSession(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	channel, err := s.State.Channel(i.ChannelID)
+	if err != nil {
+		channel, err = s.Channel(i.ChannelID)
+	}
+
+	if err != nil || !channel.IsThread() {
+		h.respondError(s, i, "이 명령어는 쓰레드 채널 안에서만 실행할 수 있습니다.")
+		return
+	}
+
+	// 1. 세션 제거
+	h.sessionManager.RemoveSession(i.ChannelID)
+
+	// 2. 디스코드 응답 전송
+	h.respond(s, i, "🔒 AI 세션이 종료되었습니다. 이 쓰레드는 잠시 후 잠금 및 아카이브 처리됩니다.")
+
+	// 3. 쓰레드 잠금 및 아카이브 (비동기로 진행하여 레이트리밋이나 인터랙션 지연 방지)
+	go func() {
+		time.Sleep(2 * time.Second)
+		archived := true
+		locked := true
+		_, _ = s.ChannelEdit(i.ChannelID, &discordgo.ChannelEdit{
+			Archived: &archived,
+			Locked:   &locked,
+		})
+	}()
 }
 
 // respond는 인터랙션에 응답을 보냅니다.
@@ -347,6 +403,19 @@ func (h *Handler) respond(s *discordgo.Session, i *discordgo.InteractionCreate, 
 		},
 	}); err != nil {
 		log.Printf("인터랙션 응답 실패: %v", err)
+	}
+}
+
+// respondEmbed는 인터랙션에 임베드 형식의 응답을 보냅니다.
+func (h *Handler) respondEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, embed *discordgo.MessageEmbed) {
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		log.Printf("인터랙션 임베드 응답 실패: %v", err)
 	}
 }
 
