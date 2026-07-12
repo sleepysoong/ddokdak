@@ -75,10 +75,9 @@ func (h *MessageHandler) HandleMessage(s *discordgo.Session, m *discordgo.Messag
 	if m.GuildID != "" {
 		isThread, parentID := getThreadDetails(m.ChannelID, s)
 		if isThread {
-			_, hasSession := h.sessionManager.GetSession(m.ChannelID)
 			isParentRegistered := parentID != "" && h.channelStore.IsRegistered(m.GuildID, parentID)
 
-			if hasSession || isParentRegistered {
+			if isParentRegistered {
 				h.handleThreadMessage(s, m)
 				return
 			}

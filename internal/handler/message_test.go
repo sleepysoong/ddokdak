@@ -177,6 +177,7 @@ func TestHandleMessage_FilterUnregisteredThreads(t *testing.T) {
 
 	channelStore := store.NewInMemoryChannelStore()
 	sessionManager := session.NewSessionManager(t.TempDir())
+	sess := sessionManager.CreateSession("thread-777") // Pre-create dirty session
 
 	h := &MessageHandler{
 		channelStore:   channelStore,
@@ -196,12 +197,11 @@ func TestHandleMessage_FilterUnregisteredThreads(t *testing.T) {
 		},
 	}
 
-	// Should return early without panicking or creating a session
+	// Should return early and NOT queue any message in the session
 	h.HandleMessage(s, m)
 
-	_, exists := sessionManager.GetSession("thread-777")
-	if exists {
-		t.Error("expected no session to be created for unregistered thread")
+	if sess.GetPendingCount() != 0 {
+		t.Errorf("expected 0 pending messages in unregistered thread session, got %d", sess.GetPendingCount())
 	}
 }
 
