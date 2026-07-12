@@ -2,6 +2,8 @@ package handler
 
 import (
 	"testing"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestTruncateString(t *testing.T) {
@@ -105,3 +107,50 @@ func TestSplitMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestGetThreadDetails(t *testing.T) {
+	s, err := discordgo.New("Bot TOKEN")
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+
+	// Mock guild
+	guild := &discordgo.Guild{
+		ID: "guild-789",
+	}
+	s.State.GuildAdd(guild)
+
+	// Mock channel
+	threadChan := &discordgo.Channel{
+		ID:       "thread-123",
+		GuildID:  "guild-789",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "parent-456",
+	}
+	s.State.ChannelAdd(threadChan)
+
+	isThread, parentID := getThreadDetails("thread-123", s)
+	if !isThread {
+		t.Error("expected isThread to be true")
+	}
+	if parentID != "parent-456" {
+		t.Errorf("expected parentID 'parent-456', got %q", parentID)
+	}
+
+	// Non-thread channel
+	normalChan := &discordgo.Channel{
+		ID:      "channel-789",
+		GuildID: "guild-789",
+		Type:    discordgo.ChannelTypeGuildText,
+	}
+	s.State.ChannelAdd(normalChan)
+
+	isThread, parentID = getThreadDetails("channel-789", s)
+	if isThread {
+		t.Error("expected isThread to be false")
+	}
+	if parentID != "" {
+		t.Errorf("expected parentID to be empty, got %q", parentID)
+	}
+}
+

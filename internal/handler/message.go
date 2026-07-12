@@ -72,9 +72,18 @@ func (h *MessageHandler) HandleMessage(s *discordgo.Session, m *discordgo.Messag
 		return
 	}
 
-	if m.GuildID != "" && isThreadChannel(m.ChannelID, s) {
-		h.handleThreadMessage(s, m)
-		return
+	if m.GuildID != "" {
+		isThread, parentID := getThreadDetails(m.ChannelID, s)
+		if isThread {
+			_, hasSession := h.sessionManager.GetSession(m.ChannelID)
+			isParentRegistered := parentID != "" && h.channelStore.IsRegistered(m.GuildID, parentID)
+
+			if hasSession || isParentRegistered {
+				h.handleThreadMessage(s, m)
+				return
+			}
+			return
+		}
 	}
 
 	if m.GuildID == "" || !h.channelStore.IsRegistered(m.GuildID, m.ChannelID) {
@@ -384,17 +393,17 @@ func (h *MessageHandler) sendErrorMessage(s *discordgo.Session, channelID string
 	}
 }
 
-// isThreadChannel은 채널이 쓰레드인지 확인합니다.
-func isThreadChannel(channelID string, s *discordgo.Session) bool {
+// getThreadDetails는 채널이 쓰레드인지 확인하고, 부모 채널 ID를 반환합니다.
+func getThreadDetails(channelID string, s *discordgo.Session) (bool, string) {
 	channel, err := s.State.Channel(channelID)
 	if err != nil {
 		// 캐시에 없으면 API로 조회
 		channel, err = s.Channel(channelID)
 		if err != nil {
-			return false
+			return false, ""
 		}
 	}
-	return channel.IsThread()
+	return channel.IsThread(), channel.ParentID
 }
 
 // truncateString은 문자열을 지정된 최대 길이로 자릅니다.
