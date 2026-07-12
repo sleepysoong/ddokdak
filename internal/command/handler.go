@@ -378,18 +378,31 @@ func (h *Handler) handleEndSession(s *discordgo.Session, i *discordgo.Interactio
 	// 1. 세션 제거
 	h.sessionManager.RemoveSession(i.ChannelID)
 
-	// 2. 디스코드 응답 전송
-	h.respond(s, i, "🔒 AI 세션이 종료되었습니다. 이 쓰레드는 잠시 후 잠금 및 아카이브 처리됩니다.")
+	// 2. 디스코드 응답 및 컴포넌트 제거
+	if i.Type == discordgo.InteractionMessageComponent {
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    "🔒 AI 세션이 종료되었습니다. 이 쓰레드는 잠시 후 잠금 및 아카이브 처리됩니다.",
+				Components: []discordgo.MessageComponent{}, // 컴포넌트 완전 제거
+			},
+		})
+	} else {
+		h.respond(s, i, "🔒 AI 세션이 종료되었습니다. 이 쓰레드는 잠시 후 잠금 및 아카이브 처리됩니다.")
+	}
 
 	// 3. 쓰레드 잠금 및 아카이브 (비동기로 진행하여 레이트리밋이나 인터랙션 지연 방지)
 	go func() {
 		time.Sleep(2 * time.Second)
 		archived := true
 		locked := true
-		_, _ = s.ChannelEdit(i.ChannelID, &discordgo.ChannelEdit{
+		_, editErr := s.ChannelEdit(i.ChannelID, &discordgo.ChannelEdit{
 			Archived: &archived,
 			Locked:   &locked,
 		})
+		if editErr != nil {
+			log.Printf("Failed to archive/lock thread %s: %v", i.ChannelID, editErr)
+		}
 	}()
 }
 

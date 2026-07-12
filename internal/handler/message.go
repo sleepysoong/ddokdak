@@ -278,6 +278,10 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 					if convID == "" {
 						logFile := filepath.Join(h.agyClient.GetLogDir(), threadID+".log")
 						convID = agy.ExtractConversationID(logFile)
+						if convID != "" {
+							sess.SetConversationID(convID)
+							h.sessionManager.Save()
+						}
 					}
 
 					if convID == "" {
