@@ -29,4 +29,4 @@ vendor/
 test_tokens*
 internal/session/data/
 data/
-
+downloads/
