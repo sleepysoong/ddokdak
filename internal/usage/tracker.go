@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sleepysoong/ddokdak/internal/models"
 	"github.com/sleepysoong/ddokdak/internal/session"
 )
 
@@ -304,7 +305,7 @@ func (d *Dashboard) FormatGlobalDashboard() string {
 			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %s\n", formatComma(u.InputTokens)))
 			sb.WriteString(fmt.Sprintf("├ 출력 토큰: %s\n", formatComma(u.OutputTokens)))
 
-			pricing, ok := matchPricing(u.ModelName)
+			pricing, ok := models.GetPricing(u.ModelName)
 			if ok {
 				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
 				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
@@ -346,7 +347,7 @@ func (d *Dashboard) FormatSessionDashboard(usages []session.ModelTokenUsage, thr
 			sb.WriteString(fmt.Sprintf("├ 입력 토큰: %s\n", formatComma(u.InputTokens)))
 			sb.WriteString(fmt.Sprintf("├ 출력 토큰: %s\n", formatComma(u.OutputTokens)))
 
-			pricing, ok := matchPricing(u.ModelName)
+			pricing, ok := models.GetPricing(u.ModelName)
 			if ok {
 				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
 				outputCost := (float64(u.OutputTokens) / 1000000.0) * pricing.OutputPriceUSD
@@ -397,7 +398,7 @@ func (d *Dashboard) FormatGlobalDashboardEmbed() *discordgo.MessageEmbed {
 		})
 	} else {
 		for _, u := range usages {
-			pricing, ok := matchPricing(u.ModelName)
+			pricing, ok := models.GetPricing(u.ModelName)
 			costText := "가격 정보 없음"
 			if ok {
 				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
@@ -453,7 +454,7 @@ func (d *Dashboard) FormatSessionDashboardEmbed(usages []session.ModelTokenUsage
 		})
 	} else {
 		for _, u := range usages {
-			pricing, ok := matchPricing(u.ModelName)
+			pricing, ok := models.GetPricing(u.ModelName)
 			costText := "가격 정보 없음"
 			if ok {
 				inputCost := (float64(u.InputTokens) / 1000000.0) * pricing.InputPriceUSD
@@ -485,45 +486,7 @@ func (d *Dashboard) FormatSessionDashboardEmbed(usages []session.ModelTokenUsage
 	return embed
 }
 
-type ModelPricing struct {
-	InputPriceUSD  float64 // per 1M tokens
-	OutputPriceUSD float64 // per 1M tokens
-}
 
-var pricingMap = map[string]ModelPricing{
-	"Gemini 3.5 Flash": {
-		InputPriceUSD:  1.5,
-		OutputPriceUSD: 9.0,
-	},
-	"Gemini 3.1 Pro": {
-		InputPriceUSD:  2.0,
-		OutputPriceUSD: 12.0,
-	},
-	"Claude Sonnet 4.6": {
-		InputPriceUSD:  3.0,
-		OutputPriceUSD: 15.0,
-	},
-	"Claude Opus 4.6 (Thinking)": {
-		InputPriceUSD:  5.0,
-		OutputPriceUSD: 25.0,
-	},
-}
-
-func matchPricing(modelName string) (ModelPricing, bool) {
-	if strings.Contains(modelName, "Gemini 3.5 Flash") {
-		return pricingMap["Gemini 3.5 Flash"], true
-	}
-	if strings.Contains(modelName, "Gemini 3.1 Pro") {
-		return pricingMap["Gemini 3.1 Pro"], true
-	}
-	if strings.Contains(modelName, "Claude Sonnet") {
-		return pricingMap["Claude Sonnet 4.6"], true
-	}
-	if strings.Contains(modelName, "Claude Opus") {
-		return pricingMap["Claude Opus 4.6 (Thinking)"], true
-	}
-	return ModelPricing{}, false
-}
 
 func getExchangeRate() float64 {
 	client := &http.Client{Timeout: 2 * time.Second}

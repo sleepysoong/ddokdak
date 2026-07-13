@@ -15,6 +15,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/agy"
 	"github.com/sleepysoong/ddokdak/internal/config"
 	"github.com/sleepysoong/ddokdak/internal/downloader"
+	"github.com/sleepysoong/ddokdak/internal/models"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
 	"github.com/sleepysoong/ddokdak/internal/usage"
@@ -124,12 +125,7 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 					discordgo.SelectMenu{
 						CustomID:    "select_model",
 						Placeholder: "🤖 이 세션의 AI 모델 변경...",
-						Options: []discordgo.SelectMenuOption{
-							{Label: "Claude Opus 4.6 (Thinking)", Value: "Claude Opus 4.6 (Thinking)"},
-							{Label: "Gemini 3.1 Pro (High)", Value: "Gemini 3.1 Pro (High)"},
-							{Label: "Gemini 3.5 Flash (High)", Value: "Gemini 3.5 Flash (High)"},
-							{Label: "Gemini 3.5 Flash (Medium)", Value: "Gemini 3.5 Flash (Medium)"},
-						},
+						Options:     models.GetSelectOptions(),
 					},
 				},
 			},
