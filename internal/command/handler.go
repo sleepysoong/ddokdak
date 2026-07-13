@@ -286,130 +286,165 @@ func (h *Handler) handleNewSessionCommand(s *discordgo.Session, i *discordgo.Int
 // handleComponent는 셀렉트 메뉴 등의 컴포넌트 인터랙션을 처리합니다.
 func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.MessageComponentData()
-	if data.CustomID == "select_session" {
-		if len(data.Values) == 0 {
+
+	handlers := map[string]func(*discordgo.Session, *discordgo.InteractionCreate, discordgo.MessageComponentInteractionData){
+		"select_session":       h.handleSelectSession,
+		"select_model":         h.handleSelectModel,
+		"select_session_model": h.handleSelectSessionModel,
+		"select_global_model":  h.handleSelectGlobalModel,
+		"btn_usage":            h.handleBtnUsage,
+		"btn_end_session":      h.handleBtnEndSession,
+	}
+
+	if handler, ok := handlers[data.CustomID]; ok {
+		handler(s, i, data)
+	}
+}
+
+// handleSelectSession은 기존 세션 선택 셀렉트 메뉴를 처리합니다.
+func (h *Handler) handleSelectSession(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) == 0 {
+		return
+	}
+	selectedConvID := data.Values[0]
+
+	channel, err := s.State.Channel(i.ChannelID)
+	if err != nil {
+		channel, err = s.Channel(i.ChannelID)
+	}
+
+	if err == nil && channel.IsThread() {
+		// 현재 채널이 쓰레드라면 세션을 덮어씌움
+		sess, exists := h.sessionManager.GetSession(i.ChannelID)
+		if !exists {
+			sess = h.sessionManager.CreateSession(i.ChannelID)
+		}
+		sess.SetConversationID(selectedConvID)
+		h.sessionManager.Save()
+		h.respond(s, i, "✅ 현재 쓰레드의 대화 세션이 선택한 세션으로 교체되었습니다. 계속 대화하세요!")
+	} else {
+		// 일반 채널이라면 새 쓰레드 생성
+		if !h.channelStore.IsRegistered(i.GuildID, i.ChannelID) {
+			h.respondError(s, i, "이 채널은 AI 대화 채널로 지정되어 있지 않습니다.")
 			return
 		}
-		selectedConvID := data.Values[0]
 
-		channel, err := s.State.Channel(i.ChannelID)
-		if err != nil {
-			channel, err = s.Channel(i.ChannelID)
-		}
-
-		if err == nil && channel.IsThread() {
-			// 현재 채널이 쓰레드라면 세션을 덮어씌움
-			sess, exists := h.sessionManager.GetSession(i.ChannelID)
-			if !exists {
-				sess = h.sessionManager.CreateSession(i.ChannelID)
-			}
-			sess.SetConversationID(selectedConvID)
-			h.sessionManager.Save()
-			h.respond(s, i, "✅ 현재 쓰레드의 대화 세션이 선택한 세션으로 교체되었습니다. 계속 대화하세요!")
-		} else {
-			// 일반 채널이라면 새 쓰레드 생성
-			if !h.channelStore.IsRegistered(i.GuildID, i.ChannelID) {
-				h.respondError(s, i, "이 채널은 AI 대화 채널로 지정되어 있지 않습니다.")
-				return
-			}
-
-			// 세션 제목 찾기
-			threadName := "불러온 대화 세션"
-			if sessions, err := agy.GetRecentSessions(25); err == nil {
-				for _, sessInfo := range sessions {
-					if sessInfo.ID == selectedConvID {
-						threadName = sessInfo.Title
-						break
-					}
+		// 세션 제목 찾기
+		threadName := "불러온 대화 세션"
+		if sessions, err := agy.GetRecentSessions(25); err == nil {
+			for _, sessInfo := range sessions {
+				if sessInfo.ID == selectedConvID {
+					threadName = sessInfo.Title
+					break
 				}
 			}
-
-			// 인터랙션 메시지에 쓰레드를 만들 수는 없으므로, 새 안내 메시지를 보내고 거기서 쓰레드를 만듦
-			msg, err := s.ChannelMessageSend(i.ChannelID, "🔗 불러온 세션으로 대화를 시작합니다...")
-			if err != nil {
-				h.respondError(s, i, "쓰레드 생성용 메시지 전송 실패.")
-				return
-			}
-
-			thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
-				Name:                threadName,
-				AutoArchiveDuration: 1440,
-			})
-			if err != nil {
-				h.respondError(s, i, "쓰레드 생성 실패.")
-				return
-			}
-
-			sess := h.sessionManager.CreateSession(thread.ID)
-			sess.SetConversationID(selectedConvID)
-			h.sessionManager.Save()
-
-			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseUpdateMessage,
-				Data: &discordgo.InteractionResponseData{
-					Content:    fmt.Sprintf("✅ 세션이 불러와졌습니다! <#%s> 에서 대화를 이어나가세요.", thread.ID),
-					Components: []discordgo.MessageComponent{}, // 셀렉트 메뉴 숨김
-				},
-			})
 		}
-	} else if data.CustomID == "select_model" {
-		if len(data.Values) == 0 {
-			return
-		}
-		modelName := data.Values[0]
-		sess, exists := h.sessionManager.GetSession(i.ChannelID)
-		if !exists {
-			h.respondError(s, i, "이 쓰레드에 활성화된 세션이 없습니다.")
-			return
-		}
-		sess.SetModel(modelName)
-		h.sessionManager.Save()
-		h.respond(s, i, fmt.Sprintf("🤖 이 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
-	} else if data.CustomID == "select_session_model" {
-		if len(data.Values) == 0 {
-			return
-		}
-		modelName := data.Values[0]
-		sess, exists := h.sessionManager.GetSession(i.ChannelID)
-		if !exists {
-			h.respondError(s, i, "이 쓰레드에 활성화된 세션이 없습니다.")
-			return
-		}
-		sess.SetModel(modelName)
-		h.sessionManager.Save()
 
-		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName),
-				Components: []discordgo.MessageComponent{}, // 컴포넌트 완전 제거
-			},
-		})
-	} else if data.CustomID == "select_global_model" {
-		if len(data.Values) == 0 {
-			return
-		}
-		modelName := data.Values[0]
-		h.config.SetGlobalModel(modelName)
-
-		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{
-				Content:    fmt.Sprintf("✅ 글로벌 기본 AI 모델이 **%s**(으)로 변경되었습니다.", modelName),
-				Components: []discordgo.MessageComponent{}, // 컴포넌트 완전 제거
-			},
-		})
-	} else if data.CustomID == "btn_usage" {
-		usages, err := h.sessionManager.GetSessionTokenUsages(i.ChannelID)
+		// 인터랙션 메시지에 쓰레드를 만들 수는 없으므로, 새 안내 메시지를 보내고 거기서 쓰레드를 만듦
+		msg, err := s.ChannelMessageSend(i.ChannelID, "🔗 불러온 세션으로 대화를 시작합니다...")
 		if err != nil {
-			h.respondError(s, i, fmt.Sprintf("세션 사용량 조회 실패: %v", err))
+			h.respondError(s, i, "쓰레드 생성용 메시지 전송 실패.")
 			return
 		}
-		embed := h.dashboard.FormatSessionDashboardEmbed(usages, i.ChannelID)
-		h.respondEmbed(s, i, embed)
-	} else if data.CustomID == "btn_end_session" {
-		h.handleEndSession(s, i)
+
+		thread, err := s.MessageThreadStartComplex(i.ChannelID, msg.ID, &discordgo.ThreadStart{
+			Name:                threadName,
+			AutoArchiveDuration: 1440,
+		})
+		if err != nil {
+			h.respondError(s, i, "쓰레드 생성 실패.")
+			return
+		}
+
+		sess := h.sessionManager.CreateSession(thread.ID)
+		sess.SetConversationID(selectedConvID)
+		h.sessionManager.Save()
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    fmt.Sprintf("✅ 세션이 불러와졌습니다! <#%s> 에서 대화를 이어나가세요.", thread.ID),
+				Components: []discordgo.MessageComponent{}, // 셀렉트 메뉴 숨김
+			},
+		})
 	}
+}
+
+// setSessionModel은 세션의 모델을 변경하는 공통 로직입니다.
+func (h *Handler) setSessionModel(s *discordgo.Session, i *discordgo.InteractionCreate, modelName string, useUpdateMessage bool) {
+	sess, exists := h.sessionManager.GetSession(i.ChannelID)
+	if !exists {
+		h.respondError(s, i, "이 쓰레드에 활성화된 세션이 없습니다.")
+		return
+	}
+	sess.SetModel(modelName)
+	h.sessionManager.Save()
+
+	msg := fmt.Sprintf("🤖 이 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName)
+	if useUpdateMessage {
+		msg = fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName)
+	}
+
+	if useUpdateMessage {
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    msg,
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+	} else {
+		h.respond(s, i, msg)
+	}
+}
+
+// handleSelectModel은 쓰레드 웰컴 메시지의 모델 선택을 처리합니다.
+func (h *Handler) handleSelectModel(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) == 0 {
+		return
+	}
+	h.setSessionModel(s, i, data.Values[0], false)
+}
+
+// handleSelectSessionModel은 /모델변경의 세션 모델 선택을 처리합니다.
+func (h *Handler) handleSelectSessionModel(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) == 0 {
+		return
+	}
+	h.setSessionModel(s, i, data.Values[0], true)
+}
+
+// handleSelectGlobalModel은 /모델변경의 글로벌 모델 선택을 처리합니다.
+func (h *Handler) handleSelectGlobalModel(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	if len(data.Values) == 0 {
+		return
+	}
+	modelName := data.Values[0]
+	h.config.SetGlobalModel(modelName)
+
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Content:    fmt.Sprintf("✅ 글로벌 기본 AI 모델이 **%s**(으)로 변경되었습니다.", modelName),
+			Components: []discordgo.MessageComponent{},
+		},
+	})
+}
+
+// handleBtnUsage는 세션 사용량 버튼 클릭을 처리합니다.
+func (h *Handler) handleBtnUsage(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	usages, err := h.sessionManager.GetSessionTokenUsages(i.ChannelID)
+	if err != nil {
+		h.respondError(s, i, fmt.Sprintf("세션 사용량 조회 실패: %v", err))
+		return
+	}
+	embed := h.dashboard.FormatSessionDashboardEmbed(usages, i.ChannelID)
+	h.respondEmbed(s, i, embed)
+}
+
+// handleBtnEndSession은 세션 종료 버튼 클릭을 처리합니다.
+func (h *Handler) handleBtnEndSession(s *discordgo.Session, i *discordgo.InteractionCreate, data discordgo.MessageComponentInteractionData) {
+	h.handleEndSession(s, i)
 }
 
 // handleEndSession은 /세션종료 커맨드 혹은 종료 버튼 클릭을 처리합니다.

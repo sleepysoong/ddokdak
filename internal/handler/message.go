@@ -14,6 +14,7 @@ import (
 	"github.com/sleepysoong/ddokdak/internal/agy"
 	"github.com/sleepysoong/ddokdak/internal/config"
 	"github.com/sleepysoong/ddokdak/internal/downloader"
+	"github.com/sleepysoong/ddokdak/internal/format"
 	"github.com/sleepysoong/ddokdak/internal/models"
 	"github.com/sleepysoong/ddokdak/internal/session"
 	"github.com/sleepysoong/ddokdak/internal/store"
@@ -32,6 +33,9 @@ const (
 
 	// maxMessageLength는 디스코드 메시지 최대 길이입니다.
 	maxMessageLength = 2000
+
+	// maxAutoArchiveDuration는 쓰레드 자동 아카이브까지의 최대 시간(분)입니다. (7일)
+	maxAutoArchiveDuration = 10080
 )
 
 // MessageHandler는 메시지 이벤트를 처리하는 핸들러입니다.
@@ -104,7 +108,7 @@ func (h *MessageHandler) handleNewConversation(s *discordgo.Session, m *discordg
 	// 쓰레드 생성 (만료되지 않도록 AutoArchiveDuration 최대값 설정)
 	thread, err := s.MessageThreadStartComplex(m.ChannelID, m.ID, &discordgo.ThreadStart{
 		Name:                threadName,
-		AutoArchiveDuration: 10080, // 7일 (최대값)
+		AutoArchiveDuration: maxAutoArchiveDuration,
 		Type:                discordgo.ChannelTypeGuildPublicThread,
 	})
 	if err != nil {
@@ -287,7 +291,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 					if convID == "" {
 						// 아직 대화 ID가 확인되지 않은 경우에도 대기 시간은 지속 업데이트
-						content := fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)", modelName, formatDuration(elapsed))
+						content := fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)", modelName, format.Duration(elapsed))
 						if content != lastContent {
 							_, _ = s.ChannelMessageEdit(threadID, thinkingMsgID, content)
 							lastContent = content
@@ -311,7 +315,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 					}
 
 					var sb strings.Builder
-					sb.WriteString(fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)\n", modelName, formatDuration(elapsed)))
+					sb.WriteString(fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)\n", modelName, format.Duration(elapsed)))
 					if len(lastToolsUsed) > 0 {
 						sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 						for _, t := range lastToolsUsed {
@@ -414,7 +418,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	finalMessage.WriteString("\n\n")
 
 	// 모델명 뒤에 (pct%) | 시간 추가
-	durationStr := formatDuration(elapsed)
+	durationStr := format.Duration(elapsed)
 	if pct > 0 {
 		finalMessage.WriteString(fmt.Sprintf("● **`%s`** `(%d%%)` | `%s`", usedModel, pct, durationStr))
 	} else {
@@ -424,16 +428,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	h.sendResponseWithEdit(s, threadID, finalMessage.String(), thinkingMsgID)
 }
 
-func formatDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
-	if m > 0 {
-		return fmt.Sprintf("%dm %ds", m, s)
-	}
-	return fmt.Sprintf("%ds", s)
-}
+
 
 
 // showTyping은 타이핑 인디케이터를 표시합니다.

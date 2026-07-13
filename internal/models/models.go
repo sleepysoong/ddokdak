@@ -97,3 +97,22 @@ func GetPricing(modelName string) (ModelInfo, bool) {
 
 	return ModelInfo{}, false
 }
+
+// CostResult는 토큰 비용 계산 결과를 담는 구조체입니다.
+type CostResult struct {
+	InputCostUSD  float64
+	OutputCostUSD float64
+	TotalCostUSD  float64
+}
+
+// CalculateCost는 입력/출력 토큰 수를 기반으로 USD 비용을 계산합니다.
+func (m ModelInfo) CalculateCost(inputTokens, outputTokens int64) CostResult {
+	inputCost := (float64(inputTokens) / 1_000_000) * m.InputPriceUSD
+	outputCost := (float64(outputTokens) / 1_000_000) * m.OutputPriceUSD
+	return CostResult{
+		InputCostUSD:  inputCost,
+		OutputCostUSD: outputCost,
+		TotalCostUSD:  inputCost + outputCost,
+	}
+}
+
