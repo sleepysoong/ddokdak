@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -300,7 +299,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 					if err == nil {
 						var currentTools []string
 						for _, exec := range executions {
-							currentTools = append(currentTools, formatToolCallInline(exec))
+							currentTools = append(currentTools, exec.FormatInline())
 						}
 						lastToolsUsed = currentTools
 					}
@@ -382,7 +381,7 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		executions, err := agy.ParseToolExecutions(finalConvID)
 		if err == nil {
 			for _, exec := range executions {
-				toolsUsed = append(toolsUsed, formatToolCallInline(exec))
+				toolsUsed = append(toolsUsed, exec.FormatInline())
 			}
 		} else {
 			log.Printf("도구 실행 내역 파싱 실패: %v", err)
@@ -436,58 +435,6 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%ds", s)
 }
 
-
-
-func stripQuotes(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-func formatToolCallInline(exec agy.ToolExecution) string {
-	// 우선순위가 높은 공통 인자 Key 목록
-	priorityKeys := []string{
-		"CommandLine", "command", "cmd",
-		"AbsolutePath", "TargetFile", "Target", "path", "file", "filename",
-		"Query", "query", "q",
-		"Url", "url", "uri",
-		"name", "Recipient",
-	}
-
-	var argVal interface{}
-	// 1. 우선순위 목록에서 먼저 매칭되는 Key를 찾음
-	for _, key := range priorityKeys {
-		if val, exists := exec.Args[key]; exists {
-			argVal = val
-			break
-		}
-	}
-
-	// 2. 만약 매칭되는 우선순위 Key가 없으면, 모든 인자를 key=value 형태로 결합 (시스템 인자 제외)
-	if argVal == nil && len(exec.Args) > 0 {
-		var parts []string
-		for k, v := range exec.Args {
-			if k == "toolAction" || k == "toolSummary" || k == "IsSkillFile" || k == "IsMock" {
-				continue
-			}
-			parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-		}
-		if len(parts) > 0 {
-			sort.Strings(parts)
-			argVal = strings.Join(parts, ", ")
-		}
-	}
-
-	if argVal != nil {
-		valStr := stripQuotes(fmt.Sprintf("%v", argVal))
-		if len(valStr) > 60 {
-			valStr = valStr[:57] + "..."
-		}
-		return fmt.Sprintf("`%s(%s)`", exec.ToolName, valStr)
-	}
-	return fmt.Sprintf("`%s`", exec.ToolName)
-}
 
 // showTyping은 타이핑 인디케이터를 표시합니다.
 func (h *MessageHandler) showTyping(ctx context.Context, s *discordgo.Session, channelID string) {

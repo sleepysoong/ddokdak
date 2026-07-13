@@ -113,3 +113,62 @@ func TestParseToolExecutionsFromFile(t *testing.T) {
 		t.Errorf("expected success to be true")
 	}
 }
+
+func TestToolExecution_FormatInline(t *testing.T) {
+	tests := []struct {
+		name     string
+		exec     ToolExecution
+		expected string
+	}{
+		{
+			name: "Priority key CommandLine",
+			exec: ToolExecution{
+				ToolName: "run_command",
+				Args:     map[string]interface{}{"CommandLine": "git diff"},
+			},
+			expected: "`run_command(git diff)`",
+		},
+		{
+			name: "Priority key AbsolutePath",
+			exec: ToolExecution{
+				ToolName: "view_file",
+				Args:     map[string]interface{}{"AbsolutePath": "\"/root/a.txt\""},
+			},
+			expected: "`view_file(/root/a.txt)`",
+		},
+		{
+			name: "Multiple args fallback sorted",
+			exec: ToolExecution{
+				ToolName: "custom_tool",
+				Args:     map[string]interface{}{"paramB": 20, "paramA": "hello", "toolAction": "action"},
+			},
+			expected: "`custom_tool(paramA=hello, paramB=20)`",
+		},
+		{
+			name: "No args",
+			exec: ToolExecution{
+				ToolName: "simple_tool",
+				Args:     nil,
+			},
+			expected: "`simple_tool`",
+		},
+		{
+			name: "Long arg truncation",
+			exec: ToolExecution{
+				ToolName: "print_log",
+				Args:     map[string]interface{}{"msg": "this is a very long log message that exceeds sixty characters for sure"},
+			},
+			expected: "`print_log(msg=this is a very long log message that exceeds sixty ch...)`",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.exec.FormatInline()
+			if result != tt.expected {
+				t.Errorf("FormatInline() = %q; want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
