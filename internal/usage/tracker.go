@@ -191,14 +191,14 @@ func (d *Dashboard) StartDashboard(s *discordgo.Session, channelID string) error
 		log.Printf("usage: DB에 대시보드 메시지 ID 저장 실패: %v", err)
 	}
 
-	// 고루틴으로 1분마다 대시보드 자동 업데이트
-	go d.runAutoUpdate(s, channelID)
+	// 고루틴으로 1분마다 대시보드 자동 업데이트 (메시지 ID를 함께 넘겨 올드 고루틴 종료 유도)
+	go d.runAutoUpdate(s, channelID, msg.ID)
 
 	return nil
 }
 
 // runAutoUpdate는 1분마다 대시보드 메시지를 자동으로 업데이트합니다.
-func (d *Dashboard) runAutoUpdate(s *discordgo.Session, channelID string) {
+func (d *Dashboard) runAutoUpdate(s *discordgo.Session, channelID string, expectedMsgID string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("🔥 [Panic Recovered] runAutoUpdate: %v", r)
@@ -213,7 +213,16 @@ func (d *Dashboard) runAutoUpdate(s *discordgo.Session, channelID string) {
 		case <-d.stopChan:
 			return
 		case <-ticker.C:
-			d.updateDashboard(s, channelID)
+			d.mu.Lock()
+			currentMsgID, exists := d.activeDashboards[channelID]
+			d.mu.Unlock()
+
+			// 만약 대시보드가 새로 생성되었거나 더 이상 활성화 상태가 아니라면 고루틴 종료
+			if !exists || currentMsgID != expectedMsgID {
+				return
+			}
+
+			d.updateDashboard(s, channelID, expectedMsgID)
 		}
 	}
 }
@@ -224,25 +233,31 @@ func (d *Dashboard) StopAllDashboards() {
 }
 
 // updateDashboard는 특정 채널의 대시보드 메시지를 업데이트합니다.
-func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string) {
-	d.mu.Lock()
-	msgID, exists := d.activeDashboards[channelID]
-	d.mu.Unlock()
-
-	if !exists {
-		return
-	}
-
+func (d *Dashboard) updateDashboard(s *discordgo.Session, channelID string, expectedMsgID string) {
 	embed := d.FormatGlobalDashboardEmbed()
-	_, err := s.ChannelMessageEditEmbed(channelID, msgID, embed)
+	_, err := s.ChannelMessageEditEmbed(channelID, expectedMsgID, embed)
 	if err != nil {
 		log.Printf("usage: 대시보드 업데이트 실패 (채널: %s): %v", channelID, err)
 
-		// 메시지가 삭제된 경우 활성 대시보드에서 제거
-		d.mu.Lock()
-		delete(d.activeDashboards, channelID)
-		d.mu.Unlock()
-		_ = d.sessionManager.DeleteActiveDashboard(channelID)
+		// 임시 네트워크 유실, API 레이트리밋(429) 등으로 인한 일시적 에러가 아니라,
+		// 실제로 메시지가 삭제되었거나(404) 권한이 없는 경우(403)에만 비활성화 처리
+		shouldRemove := false
+		if restErr, ok := err.(*discordgo.RESTError); ok {
+			status := restErr.Response.StatusCode
+			if status == 404 || status == 403 {
+				shouldRemove = true
+			}
+		}
+
+		if shouldRemove {
+			d.mu.Lock()
+			currentMsgID, exists := d.activeDashboards[channelID]
+			if exists && currentMsgID == expectedMsgID {
+				delete(d.activeDashboards, channelID)
+				_ = d.sessionManager.DeleteActiveDashboard(channelID)
+			}
+			d.mu.Unlock()
+		}
 	}
 }
 
@@ -258,7 +273,7 @@ func (d *Dashboard) RestoreDashboards(s *discordgo.Session) error {
 
 	for channelID, messageID := range dbDashboards {
 		d.activeDashboards[channelID] = messageID
-		go d.runAutoUpdate(s, channelID)
+		go d.runAutoUpdate(s, channelID, messageID)
 	}
 
 	log.Printf("📊 %d개의 사용량 대시보드를 DB로부터 성공적으로 복구하여 자동 업데이트 루프를 시작했습니다.", len(dbDashboards))
