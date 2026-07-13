@@ -244,8 +244,17 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	go h.showTyping(ctx, s, threadID)
 
-	// 1. 디스코드 생각 중(Thinking) 메시지 전송
-	thinkingMsg, err := s.ChannelMessageSend(threadID, "⏳ **AI가 생각하는 중입니다...**")
+	// 세션 모델 확인 (없으면 글로벌 모델 사용)
+	modelName := sess.GetModel()
+	if modelName == "" {
+		modelName = h.config.GetGlobalModel()
+	}
+
+	startTime := time.Now()
+
+	// 1. 디스코드 생각 중(Thinking) 메시지 전송 (사용자 요청 커스텀 양식)
+	initialContent := fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`0s`)", modelName)
+	thinkingMsg, err := s.ChannelMessageSend(threadID, initialContent)
 	var thinkingMsgID string
 	if err == nil {
 		thinkingMsgID = thinkingMsg.ID
@@ -253,27 +262,24 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		log.Printf("생각 중 메시지 전송 실패: %v", err)
 	}
 
-	// 세션 모델 확인 (없으면 글로벌 모델 사용)
-	modelName := sess.GetModel()
-	if modelName == "" {
-		modelName = h.config.GetGlobalModel()
-	}
-
-	// 2. 백그라운드 실시간 진행 상황 업데이트 고루틴 가동
+	// 2. 백그라운드 실시간 진행 상황 업데이트 고루틴 가동 (1초 마다 업데이트)
 	updateCtx, updateCancel := context.WithCancel(context.Background())
 	defer updateCancel()
 
 	if thinkingMsgID != "" {
 		go func() {
-			ticker := time.NewTicker(3 * time.Second)
+			ticker := time.NewTicker(1 * time.Second)
 			defer ticker.Stop()
 
+			var lastToolsUsed []string
 			var lastContent string
 			for {
 				select {
 				case <-updateCtx.Done():
 					return
 				case <-ticker.C:
+					elapsed := time.Since(startTime)
+
 					convID := sess.GetConversationID()
 					if convID == "" {
 						logFile := filepath.Join(h.agyClient.GetLogDir(), threadID+".log")
@@ -285,15 +291,22 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 					}
 
 					if convID == "" {
+						// 아직 대화 ID가 확인되지 않은 경우에도 대기 시간은 지속 업데이트
+						content := fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)", modelName, formatDuration(elapsed))
+						if content != lastContent {
+							_, _ = s.ChannelMessageEdit(threadID, thinkingMsgID, content)
+							lastContent = content
+						}
 						continue
 					}
 
 					executions, err := agy.ParseToolExecutions(convID)
-					var toolsUsed []string
 					if err == nil {
+						var currentTools []string
 						for _, exec := range executions {
-							toolsUsed = append(toolsUsed, formatToolCallInline(exec))
+							currentTools = append(currentTools, formatToolCallInline(exec))
 						}
+						lastToolsUsed = currentTools
 					}
 
 					var pct int
@@ -303,10 +316,10 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 					}
 
 					var sb strings.Builder
-					sb.WriteString("⏳ **AI가 생각하는 중입니다...**\n")
-					if len(toolsUsed) > 0 {
+					sb.WriteString(fmt.Sprintf("● **`%s`**로 응답을 생성하는 중입니다. (`%s`)\n", modelName, formatDuration(elapsed)))
+					if len(lastToolsUsed) > 0 {
 						sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-						for _, t := range toolsUsed {
+						for _, t := range lastToolsUsed {
 							sb.WriteString(fmt.Sprintf("○ %s\n", t))
 						}
 					}
@@ -325,7 +338,6 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	}
 
 	conversationID := sess.GetConversationID()
-	startTime := time.Now()
 	response, newConversationID, actualModel, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
 	elapsed := time.Since(startTime)
 
@@ -362,10 +374,16 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 		usedModel = actualModel
 	}
 
+	// 최종 대화 ID 확정 (동영상/웹검색 및 실시간 텔레메트리 파싱용)
+	finalConvID := sess.GetConversationID()
+	if finalConvID == "" {
+		finalConvID = newConversationID
+	}
+
 	// 도구 호출 및 결과 파싱
 	var toolsUsed []string
-	if newConversationID != "" {
-		executions, err := agy.ParseToolExecutions(newConversationID)
+	if finalConvID != "" {
+		executions, err := agy.ParseToolExecutions(finalConvID)
 		if err == nil {
 			for _, exec := range executions {
 				toolsUsed = append(toolsUsed, formatToolCallInline(exec))
@@ -377,8 +395,8 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 
 	// 실시간 텔레메트리(컨텍스트 비율 및 사용 토큰 수) 파싱
 	var pct int
-	if newConversationID != "" {
-		telemetry, err := agy.ParseTelemetry(newConversationID)
+	if finalConvID != "" {
+		telemetry, err := agy.ParseTelemetry(finalConvID)
 		if err == nil {
 			pct = telemetry.Pct
 			// sqlite에 세션별 모델 토큰 사용량 기록
