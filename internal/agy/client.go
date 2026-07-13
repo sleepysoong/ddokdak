@@ -131,16 +131,12 @@ func ExtractConversationID(logFile string) string {
 		return ""
 	}
 	
-	// agy logs usually contain: Created conversation <uuid>
-	// or Print mode: conversation=<uuid>
 	lines := strings.Split(string(content), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := lines[i]
-		if strings.Contains(line, "Created conversation") || strings.Contains(line, "Print mode: conversation=") {
-			matches := uuidRegex.FindStringSubmatch(line)
-			if len(matches) > 1 {
-				return matches[1]
-			}
+		matches := uuidRegex.FindStringSubmatch(line)
+		if len(matches) > 1 {
+			return matches[1]
 		}
 	}
 	return ""

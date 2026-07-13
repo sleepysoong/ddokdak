@@ -325,7 +325,9 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	}
 
 	conversationID := sess.GetConversationID()
+	startTime := time.Now()
 	response, newConversationID, actualModel, err := h.agyClient.Execute(ctx, prompt, modelName, conversationID, threadID)
+	elapsed := time.Since(startTime)
 
 	// 실시간 업데이트 루프 종료
 	updateCancel()
@@ -398,14 +400,26 @@ func (h *MessageHandler) processAIResponse(s *discordgo.Session, threadID string
 	finalMessage.WriteString(response)
 	finalMessage.WriteString("\n\n")
 
-	// 모델명 뒤에 (pct%) 추가
+	// 모델명 뒤에 (pct%) | 시간 추가
+	durationStr := formatDuration(elapsed)
 	if pct > 0 {
-		finalMessage.WriteString(fmt.Sprintf("● **`%s`** `(%d%%)`", usedModel, pct))
+		finalMessage.WriteString(fmt.Sprintf("● **`%s`** `(%d%%)` | `%s`", usedModel, pct, durationStr))
 	} else {
-		finalMessage.WriteString(fmt.Sprintf("● **`%s`**", usedModel))
+		finalMessage.WriteString(fmt.Sprintf("● **`%s`** | `%s`", usedModel, durationStr))
 	}
 
 	h.sendResponseWithEdit(s, threadID, finalMessage.String(), thinkingMsgID)
+}
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+	if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 
