@@ -39,25 +39,7 @@ var commands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "모델변경",
-		Description: "AI 모델을 변경합니다.",
-		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "타입",
-				Description: "글로벌 전체 변경인지, 현재 세션 변경인지 선택하세요.",
-				Required:    true,
-				Choices: []*discordgo.ApplicationCommandOptionChoice{
-					{Name: "세션 (현재 대화만)", Value: "session"},
-					{Name: "글로벌 (기본값)", Value: "global"},
-				},
-			},
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "모델명",
-				Description: "변경할 모델명을 입력하세요 (예: Gemini 3.1 Pro (High))",
-				Required:    true,
-			},
-		},
+		Description: "글로벌 기본 AI 모델 또는 현재 세션의 AI 모델을 변경합니다.",
 	},
 	{
 		Name:        "사용량",

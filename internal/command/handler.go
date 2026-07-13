@@ -127,35 +127,54 @@ func (h *Handler) handleUnsetChannel(s *discordgo.Session, i *discordgo.Interact
 	h.respond(s, i, fmt.Sprintf("✅ <#%s> 채널의 AI 대화 기능이 해제되었습니다.", channel.ID))
 }
 
-// handleModelChange는 /모델변경 커맨드를 처리합니다.
+// handleModelChange는 /모델변경 커맨드를 처리합니다. (드롭다운 인터랙티브 컴포넌트 제공)
 func (h *Handler) handleModelChange(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := i.ApplicationCommandData().Options
-	if len(options) < 2 {
-		h.respondError(s, i, "타입과 모델명을 모두 입력해주세요.")
-		return
+	_, hasSession := h.sessionManager.GetSession(i.ChannelID)
+
+	modelOptions := []discordgo.SelectMenuOption{
+		{Label: "Claude Opus 4.6 (Thinking)", Value: "Claude Opus 4.6 (Thinking)"},
+		{Label: "Gemini 3.1 Pro (High)", Value: "Gemini 3.1 Pro (High)"},
+		{Label: "Gemini 3.5 Flash (High)", Value: "Gemini 3.5 Flash (High)"},
+		{Label: "Gemini 3.5 Flash (Medium)", Value: "Gemini 3.5 Flash (Medium)"},
 	}
 
-	changeType := options[0].StringValue()
-	modelName := options[1].StringValue()
-
-	if changeType == "global" {
-		h.config.SetGlobalModel(modelName)
-		h.respond(s, i, fmt.Sprintf("✅ 글로벌 기본 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
-		return
+	sessionPlaceholder := "🤖 이 세션의 AI 모델 변경..."
+	if !hasSession {
+		sessionPlaceholder = "❌ 이 채널은 세션 쓰레드가 아닙니다."
 	}
 
-	if changeType == "session" {
-		// 현재 채널이 쓰레드이고 세션이 존재하는지 확인
-		sess, exists := h.sessionManager.GetSession(i.ChannelID)
-		if !exists {
-			h.respondError(s, i, "현재 채널은 활성화된 AI 대화 세션(쓰레드)이 아닙니다.")
-			return
-		}
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "select_global_model",
+					Placeholder: "🌐 글로벌 기본 AI 모델 변경...",
+					Options:     modelOptions,
+				},
+			},
+		},
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "select_session_model",
+					Placeholder: sessionPlaceholder,
+					Options:     modelOptions,
+					Disabled:    !hasSession,
+				},
+			},
+		},
+	}
 
-		sess.SetModel(modelName)
-		h.sessionManager.Save()
-		h.respond(s, i, fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
-		return
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content:    "⚙️ **변경할 AI 모델과 대상을 선택하세요.**\n- **글로벌 기본 모델**: 새 쓰레드 생성 시 기본으로 사용되는 모델입니다.\n- **세션 모델**: 현재 쓰레드 내에서만 커스텀으로 사용되는 모델입니다.",
+			Components: components,
+			Flags:      discordgo.MessageFlagsEphemeral,
+		},
+	})
+	if err != nil {
+		log.Printf("모델변경 인터랙션 응답 실패: %v", err)
 	}
 }
 
@@ -350,6 +369,40 @@ func (h *Handler) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 		sess.SetModel(modelName)
 		h.sessionManager.Save()
 		h.respond(s, i, fmt.Sprintf("🤖 이 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName))
+	} else if data.CustomID == "select_session_model" {
+		if len(data.Values) == 0 {
+			return
+		}
+		modelName := data.Values[0]
+		sess, exists := h.sessionManager.GetSession(i.ChannelID)
+		if !exists {
+			h.respondError(s, i, "이 쓰레드에 활성화된 세션이 없습니다.")
+			return
+		}
+		sess.SetModel(modelName)
+		h.sessionManager.Save()
+
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    fmt.Sprintf("✅ 현재 세션의 AI 모델이 **%s**(으)로 변경되었습니다.", modelName),
+				Components: []discordgo.MessageComponent{}, // 컴포넌트 완전 제거
+			},
+		})
+	} else if data.CustomID == "select_global_model" {
+		if len(data.Values) == 0 {
+			return
+		}
+		modelName := data.Values[0]
+		h.config.SetGlobalModel(modelName)
+
+		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Content:    fmt.Sprintf("✅ 글로벌 기본 AI 모델이 **%s**(으)로 변경되었습니다.", modelName),
+				Components: []discordgo.MessageComponent{}, // 컴포넌트 완전 제거
+			},
+		})
 	} else if data.CustomID == "btn_usage" {
 		usages, err := h.sessionManager.GetSessionTokenUsages(i.ChannelID)
 		if err != nil {
